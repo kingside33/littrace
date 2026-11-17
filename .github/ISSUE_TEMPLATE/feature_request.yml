@@ -1,0 +1,64 @@
+name: Feature request
+description: Suggest something littrace should be able to do
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: |
+        Describe the situation rather than only the solution: what you are
+        working on, where littrace makes you stop, and what you do instead
+        today. Fake citations and example data are welcome.
+      placeholder: |
+        When I compare two papers with different method taxonomies, I ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like to happen
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do today instead
+      description: The workaround, even if it is "search the PDF by hand".
+
+  - type: dropdown
+    id: offline
+    attributes:
+      label: Must this work with no network?
+      options:
+        - "Yes"
+        - "No"
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: cloud
+    attributes:
+      label: Does it need a cloud model or a hosted service?
+      description: |
+        If yes, explain why the local path cannot do it. A cloud capability
+        must be explicit, configurable and switchable off.
+
+  - type: markdown
+    attributes:
+      value: |
+        **Scope.** littrace is a local-first library tool. The default is no
+        network; cloud capabilities must be explicit, configurable and
+        switchable off. This repository is the AGPL-3.0-only community core.
+        Some future capabilities — advanced features in the Zotero plugin, a
+        hosted service, institutional licensing — may be commercial. An issue
+        is not a roadmap commitment, and no paid feature or date is promised
+        here. Chinese or English is fine.
+
+        **Keep the request reproducible.** Include the command or screen you
+        used, the expected result, and any index or model configuration it
+        depends on. Do not include API keys, tokens, cookies, endpoint URLs, or
+        personal file paths; redact them before pasting.

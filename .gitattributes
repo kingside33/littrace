@@ -1,0 +1,27 @@
+# 统一换行：仓库内文本一律按 LF 检出，Windows 上也不做 CRLF 转换。
+# 这是 Tavotto .gitattributes 的核心教训：被逐字节比较或被静态服务按字节
+# 计算的生成物，CRLF 会让 Windows 那条腿单独变红，而内容一个字都没改。
+* text=auto eol=lf
+
+# 前端静态资源由 kbapp.core.web_assets 按 manifest.json 拼接，并按字节生成
+# ETag；换行符必须确定，否则 Windows 检出的版本与服务端缓存判据不一致。
+kbapp/web/assets/** text eol=lf
+
+# 测试夹具里的 JSON 会参与逐字节比较。
+tests/fixtures/** text eol=lf
+
+# 二进制资产：不要做换行转换，也不要在 diff 里展开。
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.npy binary
+*.npz binary
+*.sqlite3 binary
+*.sqlite3-wal binary
+*.sqlite3-shm binary

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>研究调度台 · 本地研究库</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/app.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<aside class="rail">
+  <a class="brand" href="#research"><span class="brand-mark">文</span><span>文献演化谱系<small>本地研究库</small></span></a>
+  <div class="nav-caption">研究工作台</div>
+  <nav aria-label="主要功能">
+    <button data-page="research"><span>◉</span>研究调度台</button>
+    <button data-page="graph" class="active"><span>⌁</span>研究演化图谱</button>
+    <button data-page="search"><span>⌕</span>证据检索与问答</button>
+    <button data-page="chains"><span>⇢</span>专题总结与研究缺口</button>
+    <button data-page="approvals"><span>▤</span>全文审批 <b id="pending-count">0</b></button>
+    <button data-page="status"><span>◷</span>索引与更新</button>
+    <button data-page="settings"><span>⚙</span>模型与费用设置</button>
+  </nav>
+  <div class="rail-project"><small>当前课题</small><strong>文献研究</strong><p>全文阅读<br><i>↓</i> 精读卡<br><i>↓</i> 方法谱系</p><a href="obsidian://open?vault=_知识库">打开 Obsidian 库 ↗</a></div>
+  <div class="rail-foot"><i id="service-dot"></i><span id="service-state">连接本地知识库</span><small>北京时间 09:00 增量更新</small></div>
+</aside>
+<div class="workspace">
+  <header><div class="breadcrumb">个人研究库 <span>/</span> <b id="page-label">研究演化图谱</b></div><div class="header-status"><span id="last-update">读取更新状态…</span><button class="button small" id="task-dashboard-link">研究调度台</button></div></header>
+  <main id="main"></main>
+</div>
+<aside id="detail" class="detail" aria-label="文献与关系详情" hidden></aside>
+<div id="toast" role="status"></div>
+<dialog id="evidence-dialog"><button class="close" id="close-dialog" aria-label="关闭">×</button><div id="dialog-content"></div></dialog>
+<dialog id="error-dialog" class="error-dialog" role="alertdialog" aria-modal="true" aria-labelledby="error-title" aria-describedby="error-summary error-impact">
+  <button class="close" id="error-close" aria-label="关闭错误提示">×</button>
+  <div class="eyebrow">任务提示</div><h2 id="error-title">操作未完成</h2>
+  <p id="error-summary"></p><p id="error-impact" class="error-impact"></p>
+  <details id="error-technical"><summary>技术详情</summary><pre id="error-details"></pre></details>
+  <div class="dialog-actions"><button class="button primary" id="error-dismiss">知道了</button></div>
+</dialog>
+</body>
+</html>

@@ -1,0 +1,279 @@
+name: Release
+
+# A tag is the only thing that publishes. `workflow_dispatch` is a full
+# rehearsal by default: it builds and checks the same artifacts but creates no
+# GitHub Release, pushes no tag, and (unless PYPI_PUBLISH_ENABLED is true) does
+# not publish to PyPI. Run the rehearsal first; tags are immutable, and PyPI
+# never allows the same filename to be uploaded twice.
+"on":
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Commit, tag, or branch to release (an exact SHA is safest)"
+        required: true
+        default: main
+      publish:
+        description: "Create the GitHub Release and allow PyPI publishing"
+        required: false
+        default: false
+        type: boolean
+
+# Read-only by default. The two publishing jobs declare the only write scopes
+# they need at job level.
+permissions:
+  contents: read
+
+jobs:
+  trust:
+    name: trust
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      publish: ${{ steps.resolve.outputs.publish }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+
+      - name: Resolve and verify the release target
+        id: resolve
+        env:
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ github.ref_name }}
+          REF_IN: ${{ inputs.ref }}
+          PUBLISH_IN: ${{ inputs.publish }}
+          PYPI_PUBLISH_ENABLED: ${{ vars.PYPI_PUBLISH_ENABLED }}
+        run: |
+          set -euo pipefail
+
+          # A tag push always publishes. A manual dispatch resolves the given
+          # ref and publishes only when the input says so.
+          if [ "$EVENT" = "push" ]; then
+            if ! SHA="$(git rev-parse --verify "refs/tags/${TAG}^{commit}" 2>/dev/null)"; then
+              echo "::error::$TAG is not a tag in this repository; refusing to release."
+              exit 1
+            fi
+            REL_TAG="$TAG"
+            PUBLISH=true
+          else
+            # A dispatch may name a branch that is only present as
+            # origin/<branch> after checkout, so try both spellings before
+            # refusing the ref.
+            if ! SHA="$(git rev-parse --verify "${REF_IN}^{commit}" 2>/dev/null)"; then
+              if ! SHA="$(git rev-parse --verify "origin/${REF_IN}^{commit}" 2>/dev/null)"; then
+                echo "::error::Cannot resolve ref=$REF_IN. Use a commit, tag, or branch that was fetched."
+                exit 1
+              fi
+            fi
+            REL_TAG=""
+            PUBLISH="${PUBLISH_IN:-false}"
+          fi
+          case "$PUBLISH" in
+            true|false) ;;
+            *) echo "::error::publish must be true or false, got: $PUBLISH"; exit 1 ;;
+          esac
+
+          # A release may only run on a commit that reached main through the
+          # protected branch. This gate sits in front of both PyPI OIDC and
+          # Release write permission, so a rehearsal is held to the same rule.
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::$SHA is not reachable from origin/main. Releases only accept commits merged into main."
+            exit 1
+          fi
+
+          # The version comes from the source tree at $SHA, not from the tag
+          # name. This package has no __version__ (kbapp/__init__.py is empty),
+          # so pyproject's [project].version is the single source of truth for
+          # the version the wheel and sdist will carry. A hand-typed tag and
+          # the packaged version must agree before a single byte reaches PyPI.
+          VER="$(git show "$SHA:pyproject.toml" | python -c '
+          import sys
+          import tomllib
+
+          data = tomllib.loads(sys.stdin.read())
+          print(str(data.get("project", {}).get("version", "")))
+          ')"
+          if [ -z "$VER" ]; then
+            echo "::error::Cannot read [project].version from pyproject.toml at $SHA."
+            exit 1
+          fi
+
+          if [ -n "$REL_TAG" ] && [ "$REL_TAG" != "v$VER" ]; then
+            echo "::error::tag $REL_TAG does not match source version $VER (expected v$VER)."
+            exit 1
+          fi
+          [ -n "$REL_TAG" ] || REL_TAG="v$VER"
+
+          # If the tag already exists it must point at the same commit.
+          # GitHub reuses an existing tag even when a different target is
+          # supplied, and immutable tag rulesets make that tag impossible to
+          # move afterwards.
+          if EXISTING="$(git rev-parse --verify "refs/tags/${REL_TAG}^{commit}" 2>/dev/null)"; then
+            if [ "$EXISTING" != "$SHA" ]; then
+              echo "::error::tag $REL_TAG already exists at $EXISTING, not $SHA. Pick a new version."
+              exit 1
+            fi
+            echo "tag $REL_TAG already exists at $SHA; reusing it."
+          fi
+
+          if [ "${PYPI_PUBLISH_ENABLED:-}" != "true" ]; then
+            echo "::notice::PYPI_PUBLISH_ENABLED is not 'true'; a tag will create a GitHub Release but will not publish to PyPI."
+          fi
+
+          {
+            echo "sha=$SHA"
+            echo "version=$VER"
+            echo "tag=$REL_TAG"
+            echo "publish=$PUBLISH"
+          } >> "$GITHUB_OUTPUT"
+          echo "resolved $SHA version=$VER tag=$REL_TAG publish=$PUBLISH"
+
+  build:
+    name: build
+    needs: trust
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.trust.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+
+      - name: Require packaging metadata
+        run: |
+          set -euo pipefail
+          if [ ! -f pyproject.toml ]; then
+            echo "::error::pyproject.toml is missing; there is no sdist or wheel to release."
+            exit 1
+          fi
+
+      - name: Build sdist and wheel, then check metadata
+        env:
+          PIP_DEFAULT_TIMEOUT: "30"
+          PIP_RETRIES: "5"
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip build twine
+          python -m build
+          python -m twine check --strict dist/*
+
+      # The tag was checked against the source version in `trust`. Check the
+      # filenames as well: `python -m build` is the step that actually stamps
+      # the version into the artifacts, and a mismatch here would publish a
+      # wheel whose name does not match the Release tag.
+      - name: Check that the built artifacts carry the trusted version
+        env:
+          VER: ${{ needs.trust.outputs.version }}
+        run: |
+          set -euo pipefail
+          test -f "dist/littrace-${VER}-py3-none-any.whl" || {
+            echo "::error::no wheel for version $VER; dist/ contains:"
+            ls -la dist/
+            exit 1
+          }
+          test -f "dist/littrace-${VER}.tar.gz" || {
+            echo "::error::no sdist for version $VER; dist/ contains:"
+            ls -la dist/
+            exit 1
+          }
+
+      # Install the built wheel, not the source tree, so a missing package
+      # file or web asset is caught before the artifact is published.
+      - name: Install the wheel into a clean venv and import it
+        env:
+          PIP_DEFAULT_TIMEOUT: "30"
+          PIP_RETRIES: "5"
+        run: |
+          set -euo pipefail
+          python -m venv /tmp/release-smoke
+          /tmp/release-smoke/bin/pip install --quiet dist/*.whl
+          # Run outside the checkout: littrace uses a flat layout, so the repo
+          # root on sys.path would shadow the installed package and hide
+          # missing files in the wheel.
+          cd /tmp
+          /tmp/release-smoke/bin/python - <<'PY'
+          import importlib.metadata
+          import pathlib
+
+          import kbapp
+          from kbapp.web.service import create_app
+
+          root = pathlib.Path(kbapp.__file__).parent
+          assert (root / "web" / "assets" / "app.css").is_file(), (
+              "web assets are missing from the wheel"
+          )
+          assert callable(create_app)
+          assert importlib.metadata.version("littrace")
+          print("ok", kbapp.__file__, importlib.metadata.version("littrace"))
+          PY
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: release-dist
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  # PyPI is a second, explicitly enabled segment. Trusted Publishing uses OIDC
+  # and needs no stored token; the `pypi` environment can additionally require
+  # a human reviewer.
+  pypi:
+    name: publish-pypi
+    needs: [trust, build]
+    if: needs.trust.outputs.publish == 'true' && vars.PYPI_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: pypi
+      url: https://pypi.org/p/littrace
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: release-dist
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          print-hash: true
+
+  github-release:
+    name: github-release
+    needs: [trust, build]
+    if: needs.trust.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: release-dist
+          path: dist
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.trust.outputs.tag }}
+          SHA: ${{ needs.trust.outputs.sha }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" dist/* \
+            --target "$SHA" \
+            --title "$TAG" \
+            --generate-notes \
+            --repo "$GITHUB_REPOSITORY"

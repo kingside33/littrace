@@ -1,0 +1,52 @@
+# ---------------------------------------------------------------------------
+# Python
+# 不带斜杠：Tavotto 仓库里 `.venv` 曾以符号链接形式被提交（mode 120000），
+# `.venv/` 这种只匹配目录的写法挡不住它。这里沿用不带斜杠的写法。
+.venv
+venv
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+.eggs/
+*.egg-info/
+/build/
+/dist/
+/wheelhouse/
+
+# 测试 / lint / 类型检查的缓存与报告
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+junit*.xml
+report.xml
+
+# 运行数据与个人文献库：kb.py 默认 KB_BASE=仓库根、KB_DATA_DIR=<base>/_index
+/_index/
+/_知识库
+/cache/
+/exports/
+*.log
+
+# 冒烟 / 本地验收 / 临时产物
+.smoke
+/artifacts/
+/test-artifacts/
+/tmp/
+/.tmp-*
+
+# 本机环境与密钥
+.env
+.env.*
+!.env.example
+
+# 编辑器与系统文件
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

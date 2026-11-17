@@ -1,0 +1,68 @@
+{
+  "schema": 1,
+  "note": "Authoritative support matrix for littrace. README.md, README.zh-CN.md and SECURITY.md link here for the authoritative values and do not maintain a separate matrix; if a summary elsewhere disagrees, this file wins. Update this file in the same commit as any change to those claims. status values: primary = developed and verified on this platform; supported = exercised end to end, version details below; unverified = expected to run but not verified; unsupported = no build and no promise.",
+  "python": {
+    "requires": ">=3.10",
+    "ci_matrix": [
+      "3.10",
+      "3.13"
+    ],
+    "nightly_matrix": [
+      "3.10",
+      "3.14"
+    ],
+    "locally_exercised": [
+      "3.13"
+    ],
+    "note": "CI is configured for CPython 3.10 and 3.13 on Ubuntu and 3.13 on Windows; the nightly workflow adds 3.14 on Ubuntu. No CI result is published while the repository is private, so these are configured targets rather than published results. At the time of writing, a local run of `python -m pytest -m \"not network and not model\"` on CPython 3.13.11 passed 455 tests, and `ruff check .` passed with both the pinned ruff 0.16.4 and the installed ruff 0.16.10. The number of passing tests changes as tests are added; do not treat a count as a promise. Python 3.11 and 3.12 appear in package classifiers but are not in the CI matrix."
+  },
+  "platforms": [
+    {
+      "id": "windows-x64",
+      "label": "Windows x64",
+      "status": "primary",
+      "note": "Primary development and verification platform. CI runs the Python suite on windows-latest with Python 3.13 and the frontend tests on windows-latest. API keys are protected with DPAPI, which is Windows-only."
+    },
+    {
+      "id": "macos",
+      "label": "macOS",
+      "status": "unverified",
+      "note": "No installer, no CI leg and no maintainer verification. DPAPI secret storage is not available; a different secret-storage adapter would be required."
+    },
+    {
+      "id": "linux",
+      "label": "Linux",
+      "status": "unverified",
+      "note": "CI is configured for ubuntu-24.04 with Python 3.10 and 3.13 plus the frontend tests, but no CI result is published while the repository is private. No maintainer verification. DPAPI secret storage is not available; a different secret-storage adapter would be required."
+    }
+  ],
+  "zotero": {
+    "status": "unverified",
+    "channel": "Local Zotero SQLite database, read-only snapshot",
+    "tested_versions": [],
+    "note": "littrace reads zotero.sqlite, item metadata, collections, attachments, notes and annotations through a read-only SQLite snapshot, and never writes to Zotero. The local schema differs across Zotero releases. Read-only access has been exercised against a working local library, but the exact Zotero release was not recorded; no specific version is pinned yet. A release will be listed in tested_versions only after an end-to-end sync against a real library. The future Zotero plugin will get its own plugin x Zotero version matrix."
+  },
+  "ollama": {
+    "status": "unverified",
+    "endpoint": "http://127.0.0.1:11434",
+    "tested_versions": [],
+    "models": {
+      "embedding": "qwen3-embedding:8b (1024 dimensions)",
+      "ocr": "glm-ocr:latest",
+      "local_verifier": "gemma4:e4b"
+    },
+    "note": "Defaults come from kbapp/core/config.py (EMBED_MODEL, GLM_OCR_MODEL and the local_text_model setting). The local verifier can be changed in settings. Changing a model invalidates caches keyed by model identity. Ollama itself has no pinned version yet. OCR can be redirected with GLM_OCR_URL, GLM_OCR_MODEL and GLM_OCR_API. CI is offline and does not exercise Ollama. No model combination has been recorded as verified, so the names above are defaults, not a tested combination."
+  },
+  "cloud": {
+    "status": "optional",
+    "protocol": "OpenAI-compatible /chat/completions",
+    "note": "Cloud verification is off by default and is configured in the settings page with an endpoint and key. The reference setup was exercised with DeepSeek-V4.1-Flash; other OpenAI-compatible endpoints are not verified. Cited answers and method-relation verification require a configured cloud endpoint; ingest, indexing, search and offline export do not."
+  },
+  "out_of_scope": [
+    "builds modified by the user, including patched dependencies or a forked kbapp",
+    "older commits and pre-release snapshots",
+    "scanner-only reports without a reproduction on a clean checkout",
+    "local model or proxy configuration errors",
+    "problems in Zotero itself, or in a library that littrace only reads"
+  ]
+}

@@ -1,0 +1,9 @@
+version: 2
+updates:
+  # The workflows use major tags for readability in pull requests; Dependabot
+  # keeps those tags current and opens a reviewable PR for each bump.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5

@@ -1,0 +1,147 @@
+name: Nightly
+
+# Nightly covers the three things a pull request matrix cannot:
+#   1. a fresh dependency resolution (no pip cache, no lockstep with PR state);
+#   2. the next runtime versions (Python 3.14, Node 24);
+#   3. the built distribution (sdist/wheel metadata and a clean-venv install).
+#
+# It deliberately does not re-run the pull request matrix. Tests that need a
+# real network service or a real local model are not run here either: CI has no
+# such credentials or model files.
+"on":
+  schedule:
+    # UTC 18:00 = 02:00 Asia/Shanghai.
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One nightly run at a time. Never cancel: an interrupted run would leave the
+# "last fresh resolution" signal missing for that day.
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  pytest-fresh:
+    name: pytest-fresh (${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 is the lower bound; 3.14 is the next version the pull request
+        # matrix does not cover yet.
+        python: ["3.10", "3.14"]
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          # No cache on purpose: this job exists to discover what a fresh
+          # resolution installs today.
+
+      - name: Install dependencies without a cache
+        env:
+          PIP_DEFAULT_TIMEOUT: "30"
+          PIP_RETRIES: "5"
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install --no-cache-dir -e ".[dev]"
+
+      - name: Run the offline test suite
+        run: python -m pytest -m "not network and not model" -rs --durations=10
+
+  frontend-fresh:
+    name: frontend-fresh (Node ${{ matrix.node }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22 is the version used by pull request CI; 24 is the next line.
+        node: ["22", "24"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+
+      # No install and no build: the browser source is native JavaScript.
+      - name: Run node tests
+        shell: bash
+        run: |
+          node --test \
+            tests/test_dashboard_ui.cjs \
+            tests/test_feedback.cjs \
+            tests/test_lineage.cjs \
+            tests/test_page_performance.cjs \
+            tests/test_references.cjs \
+            tests/test_reliability_graph.cjs \
+            tests/test_role_bubbles.cjs \
+            tests/test_search.cjs \
+            tests/test_task_entry.cjs
+
+  package-smoke:
+    name: package-smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      # `python -m build` needs packaging metadata. Fail with an explicit
+      # message rather than skipping the job, so a missing distribution is
+      # visible instead of looking green.
+      - name: Require packaging metadata
+        run: |
+          set -euo pipefail
+          if [ ! -f pyproject.toml ]; then
+            echo "::error::pyproject.toml is missing; the sdist/wheel cannot be built. Add packaging metadata before relying on package-smoke."
+            exit 1
+          fi
+
+      - name: Build sdist and wheel, then check metadata
+        env:
+          PIP_DEFAULT_TIMEOUT: "30"
+          PIP_RETRIES: "5"
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip build twine
+          python -m build
+          python -m twine check --strict dist/*
+
+      - name: Install the wheel into a clean venv and import it
+        env:
+          PIP_DEFAULT_TIMEOUT: "30"
+          PIP_RETRIES: "5"
+        run: |
+          set -euo pipefail
+          python -m venv /tmp/littrace-smoke
+          /tmp/littrace-smoke/bin/pip install --quiet dist/*.whl
+          # Run outside the checkout: littrace uses a flat layout, so the repo
+          # root on sys.path would shadow the installed package and hide
+          # missing files in the wheel.
+          cd /tmp
+          /tmp/littrace-smoke/bin/python - <<'PY'
+          import importlib.metadata
+          import pathlib
+
+          import kbapp
+          from kbapp.web.service import create_app
+
+          root = pathlib.Path(kbapp.__file__).parent
+          assert (root / "web" / "assets" / "app.css").is_file(), (
+              "web assets are missing from the wheel"
+          )
+          assert callable(create_app)
+          assert importlib.metadata.version("littrace")
+          print("ok", kbapp.__file__, importlib.metadata.version("littrace"))
+          PY

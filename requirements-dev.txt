@@ -1,0 +1,7 @@
+-r requirements.txt
+
+# 与 pyproject.toml 的 [project.optional-dependencies].dev 同名同范围。
+# ruff 在这里钉死精确版本，CI 从这里读取；不要在 workflow 里写第二份。
+pytest>=8
+build>=1.2
+ruff==0.16.4

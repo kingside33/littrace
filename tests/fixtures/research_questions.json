@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "synthetic": true,
+  "source_review": "Synthetic fixture for the retrieval evaluation runner; fictional papers, identifiers and excerpts only. Replace with your own dataset via --questions.",
+  "human_review_status": "not_applicable",
+  "questions": [
+    {
+      "id": "q01",
+      "category": "single",
+      "query": "Which search order does the synthetic planner use?",
+      "filters": {},
+      "expected_sources": [
+        {
+          "paper_id": "fixture:paper-a",
+          "source_id": "fixture:paper-a#001:synthetic0001",
+          "page": 1,
+          "quote": "The synthetic planner explores the frontier in breadth-first order before expanding any deeper node."
+        }
+      ],
+      "review": "Synthetic evidence; not derived from a real publication."
+    },
+    {
+      "id": "q02",
+      "category": "single",
+      "query": "What complexity bound does the synthetic planner claim?",
+      "filters": {},
+      "expected_sources": [
+        {
+          "paper_id": "fixture:paper-a",
+          "source_id": "fixture:paper-a#002:synthetic0002",
+          "page": 2,
+          "quote": "The reported time bound is linear in the number of frontier edges for a fixed branching factor."
+        }
+      ],
+      "review": "Synthetic evidence; not derived from a real publication."
+    },
+    {
+      "id": "q03",
+      "category": "lineage",
+      "query": "How does the second synthetic planner relate to the first one?",
+      "filters": {},
+      "expected_sources": [
+        {
+          "paper_id": "fixture:paper-b",
+          "source_id": "fixture:paper-b#003:synthetic0003",
+          "page": 3,
+          "quote": "The second synthetic planner keeps the frontier representation of the first and adds a priority queue."
+        }
+      ],
+      "review": "Synthetic evidence; not derived from a real publication."
+    },
+    {
+      "id": "q04",
+      "category": "comparison",
+      "query": "Compare the two synthetic planners on memory use.",
+      "filters": {},
+      "expected_sources": [
+        {
+          "paper_id": "fixture:paper-a",
+          "source_id": "fixture:paper-a#004:synthetic0004",
+          "page": 4,
+          "quote": "The first synthetic planner stores every generated node until the search terminates."
+        },
+        {
+          "paper_id": "fixture:paper-b",
+          "source_id": "fixture:paper-b#004:synthetic0005",
+          "page": 4,
+          "quote": "The second synthetic planner releases nodes that fall outside the current priority window."
+        }
+      ],
+      "review": "Synthetic evidence; not derived from a real publication."
+    },
+    {
+      "id": "q05",
+      "category": "external_abstract",
+      "query": "What can be concluded from the available synthetic abstract only?",
+      "filters": {
+        "paper": "fixture:external-c"
+      },
+      "expected_sources": [
+        {
+          "paper_id": "fixture:external-c",
+          "source_id": "fixture:external-c#abstract:synthetic0006",
+          "page": 1,
+          "quote": "This synthetic abstract describes a planner for a fictional grid and reports no experimental results."
+        }
+      ],
+      "review": "Synthetic abstract fragment; it does not represent a complete abstract or full text."
+    },
+    {
+      "id": "q06",
+      "category": "insufficient_or_adversarial",
+      "query": "Prove that every synthetic planner always finds a globally optimal solution in finite time.",
+      "filters": {},
+      "expected_sources": [],
+      "answer_rubric": "Do not infer a finite-time guarantee from an asymptotic claim.",
+      "review": "Synthetic adversarial check; answer audit only."
+    }
+  ]
+}

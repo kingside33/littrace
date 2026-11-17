@@ -1,0 +1,147 @@
+name: Bug report
+description: Something in littrace behaves wrongly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug.
+
+        The two things that make a report actionable are the complete output of
+        `python kb.py doctor status` and exact reproduction steps. That command
+        reports index state, the active data revision, recent jobs, and local
+        setup state.
+
+        **Before you paste anything, remove API keys, access tokens, cookies,
+        endpoint URLs, and personal file paths.** `doctor status` can contain
+        local directory names and local model configuration. Replace them with
+        placeholders such as `<home>/library` or `<api-key>`. Never paste a
+        real key or token.
+
+        If this is a security issue, do not file it publicly. Use
+        [private vulnerability reporting](https://github.com/kingside33/littrace/security/advisories/new)
+        instead.
+
+        Write in Chinese or English, whichever is easier.
+
+        Do not attach PDFs, notes, `zotero.sqlite`, `_index/state/settings.json`
+        or any file that may contain a key. A minimal reproduction with fake
+        data is better.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you saw, and what you expected instead.
+      placeholder: |
+        I ran `python kb.py doctor status` and ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: |
+        Give the exact commands and the citekey, document, or endpoint involved.
+        A minimal example with fake data is better than an unpublished PDF;
+        do not attach research material you cannot share.
+      placeholder: |
+        1. From the repository root, run `python kb.py ...`
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`python kb.py doctor status` output"
+      description: |
+        Run this from the repository root and paste the complete output. Redact
+        API keys, tokens, cookies, endpoint URLs, and personal paths first. If
+        the command itself fails, paste the error or traceback instead.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: littrace version or commit
+      description: |
+        `pip show littrace` prints the version (for example `0.1.0`); for a
+        source checkout, `git rev-parse HEAD` prints the commit. `doctor
+        status` does not include either, so copy it from one of those commands.
+      placeholder: "0.1.0 / v0.1.0 / 40-character commit SHA"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How are you running littrace (optional)
+      options:
+        - From source — Windows
+        - From source — macOS
+        - From source — Linux
+        - PowerShell workbench installer (`ops/Install-Workbench.ps1`)
+        - Other (explain)
+
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system
+      description: |
+        Include the version and, on Windows, the code page or locale when the
+        problem involves non-ASCII paths or text.
+      placeholder: "Windows 11 24H2 / Ubuntu 24.04 / macOS 15.3"
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: Output of `python --version`.
+      placeholder: "Python 3.13.11"
+    validations:
+      required: true
+
+  - type: input
+    id: zotero
+    attributes:
+      label: Zotero involvement (optional)
+      description: |
+        Zotero version and whether the database was mounted read-only.
+        Redact the path; do not attach the database.
+
+  - type: input
+    id: models
+    attributes:
+      label: Local model stack (optional)
+      description: |
+        Ollama version and the embedding, OCR and verification model names.
+        Redact endpoint URLs; do not paste keys or credentials.
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs (optional)
+      description: |
+        Logs from `_index/runtime`, redacted. Remove keys, tokens, cookies,
+        endpoint URLs, absolute paths, library names and Zotero paths.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots, the exact error text, and what you already tried.
+
+  - type: checkboxes
+    id: redaction
+    attributes:
+      label: Redaction
+      options:
+        - label: I removed private library content, absolute paths, endpoint URLs, API keys, and tokens.
+          required: true
