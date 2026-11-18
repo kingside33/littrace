@@ -30,5 +30,11 @@ main 上的 U2(#31)同样修改了 `plugin/src/registry.ts`,使本分支变为
 
 PR 转为 `MERGEABLE`,CI 重新触发并全绿(含 dco)。合并提交不影响两个修复提交的语义,
 评审线程已补充说明。合入后本地实跑:244 个 node 用例与 467 个 pytest 用例全部通过。
-代价是历史多一个 merge commit;`registry.ts` 的两处冲突需要人工确认是「两边都保留」
-而非一方覆盖——这一点没有自动守卫。
+代价是历史多一个 merge commit。
+
+`registry.ts` 两处冲突的「一方覆盖」并非没有守卫:取无 `createReadingColumn` 的
+main 一侧(`0fb54e0`)则 `tests/test_plugin_column.cjs:643-652` 的锚点失败;取无
+`createItemSections` 的 U1 一侧(`4ed958d`)则
+`tests/test_plugin_sections.cjs:679-689` 失败;取无 `createTabHost` 的一侧则
+`tests/test_plugin_tabs.cjs:357-367` 失败。没有自动守卫的是「两边都在、但内容被
+改错」这类语义错误,仍需人工核对。
