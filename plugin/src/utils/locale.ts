@@ -1,10 +1,10 @@
 import { config } from "../../package.json";
+import { messageId } from "../readerPanelCore.mjs";
 
 /**
  * Minimal Fluent bootstrap: load the plugin's FTL bundle once. The build
  * renames `addon.ftl` to `{addonRef}-addon.ftl` and prefixes the keys, so
- * the resource id and lookups use the prefixed name. Message-lookup helpers
- * arrive with the first UI feature that needs them.
+ * the resource id and lookups use the prefixed name.
  */
 let l10n: Localization | undefined;
 
@@ -29,4 +29,28 @@ export function initLocale(): void {
     [`${config.addonRef}-addon.ftl`],
     true,
   );
+}
+
+/**
+ * Look up one Fluent message. Keys are written without the build prefix
+ * everywhere in `src/`, so the prefix is added here and nowhere else.
+ *
+ * A missing message must be visible, not a blank button: fall back to the
+ * raw key rather than an empty string, and log the miss so a forgotten FTL
+ * entry shows up in the Zotero console during real-machine acceptance.
+ */
+export function t(key: string): string {
+  const id = messageId(key, config.addonRef);
+  if (!l10n) {
+    Zotero.logError(
+      new Error(`littrace: locale used before initLocale() for "${id}"`),
+    );
+    return id;
+  }
+  const [message] = l10n.formatMessagesSync([{ id }]);
+  if (!message || message.value === null) {
+    Zotero.logError(new Error(`littrace: missing Fluent message "${id}"`));
+    return id;
+  }
+  return message.value;
 }

@@ -1,4 +1,5 @@
 import { createRegistry } from "./registryCore.mjs";
+import { registerReaderEvents } from "./readerPanel";
 
 /**
  * The single registration entry of the plugin.
@@ -20,6 +21,9 @@ import { createRegistry } from "./registryCore.mjs";
  */
 
 export type Disposer = () => void;
+
+/** Guards registerWindowIndependent against a second startup path. */
+let globalsRegistered = false;
 
 const registry = createRegistry((error: unknown, id: string) => {
   Zotero.logError(
@@ -55,7 +59,27 @@ export async function registerAll(win: Window): Promise<void> {
     return;
   }
   // Future features hook in here; each keeps its own
-  // `register(win, id, dispose)`.
+  // `register(win, id, dispose)`. Reader events are NOT registered here: see
+  // registerWindowIndependent() below.
+}
+
+/**
+ * Register every window-independent feature. Called once from startup, NOT
+ * once per window: `Zotero.Reader.registerEventListener` is global, so
+ * registering it per main window would inject the selection buttons twice
+ * and the second `unregisterEventListener` would remove the first handler's
+ * twin. Reclaimed on shutdown only, per the (window, id) / global split in
+ * docs/adr/0009-registry-keyed-by-window.md.
+ */
+export function registerWindowIndependent(): void {
+  if (globalsRegistered) {
+    return;
+  }
+  globalsRegistered = true;
+  // Reader events: the evidence-Q&A panel and the two selection buttons.
+  // The disposer unregisters both handlers and closes any panel it opened,
+  // so a disabled plugin leaves no listener or DOM behind in an open reader.
+  registerGlobal("reader-panel", registerReaderEvents());
 }
 
 /**
@@ -72,4 +96,7 @@ export function unregisterWindow(win: Window): void {
  */
 export function unregisterAll(): void {
   registry.unregisterEverything();
+  // Allow a later startup (disable → enable in the same session) to register
+  // the window-independent features again.
+  globalsRegistered = false;
 }

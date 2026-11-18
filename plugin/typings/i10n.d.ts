@@ -3,5 +3,23 @@
 /* eslint-disable */
 // @ts-nocheck
 export type FluentMessageId =
+  | 'reader-panel-ask'
+  | 'reader-panel-close'
+  | 'reader-panel-demo-note'
+  | 'reader-panel-empty'
+  | 'reader-panel-evidence'
+  | 'reader-panel-example'
+  | 'reader-panel-failure'
+  | 'reader-panel-gap'
+  | 'reader-panel-gap-hint'
+  | 'reader-panel-placeholder'
+  | 'reader-panel-retry'
+  | 'reader-panel-stage-searching'
+  | 'reader-panel-stage-verifying'
+  | 'reader-panel-title'
+  | 'reader-panel-toolbar-entry'
+  | 'reader-panel-wait'
+  | 'reader-selection-evidence'
+  | 'reader-selection-lineage'
   | 'startup-begin'
   | 'startup-finish';
