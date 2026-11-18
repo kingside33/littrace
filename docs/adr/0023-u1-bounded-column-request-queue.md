@@ -18,7 +18,7 @@
 队列与常量 `DEFAULT_MAX_CONCURRENT_REQUESTS = 6`
 (`plugin/src/columns/columnDataCore.mjs:69`):超出上限的载入排队,完成后由 `pump()`
 继续;排队中的 key 若已被填入(或已失败)则直接跳过、不发请求
-(`plugin/src/columns/columnDataCore.mjs:468`)。上限通过 `maxConcurrentRequests`
+(`plugin/src/columns/columnDataCore.mjs:469`)。上限通过 `maxConcurrentRequests`
 注入,以便测试用小值验证。
 
 ## 备选

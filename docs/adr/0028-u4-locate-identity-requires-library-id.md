@@ -11,9 +11,9 @@ littrace 文献标识。评审用仓库自带 Store 实跑证实:裸 key 必然�
 
 原因在解析链:`Store.resolve` 只查 DOI 与 `aliases` 表,未命中就原样返回
 (`kbapp/storage/store.py:155-167`),而裸 Zotero key 不在任何 alias 里,于是
-`paper_view` 抛「文献不存在」(`kbapp/web/library_api.py:16`),`graph_page` 也解析
-不到任何节点。littrace 自己的文献标识形态是 `z:<libraryID>:<zoteroKey>`
-(`kbapp/library/sources.py:34-40`)。
+`paper_view` 抛「文献不存在」(`kbapp/web/library_api.py:17-20`:resolve → 判空 →
+`raise ValueError`),`graph_page` 也解析不到任何节点。littrace 自己的文献标识形态是
+`z:<libraryID>:<zoteroKey>`(`kbapp/library/sources.py:34-40`)。
 
 ## 决策
 
