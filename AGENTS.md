@@ -63,11 +63,14 @@ origin/main 切分支、在独立 worktree(`.worktrees/<分支名>`)工作 → �
 
 ```sh
 ruff check                                                    # python-lint
-.venv/Scripts/python.exe -m pytest -m "not network and not model"  # pytest 离线套件
+python -m pytest -m "not network and not model"               # pytest 离线套件(与 ci.yml 同款)
 node --test <ci.yml 显式清单>                                  # node 测试
-.venv/Scripts/python.exe kb.py doctor architecture            # 架构守卫
+python kb.py doctor architecture                              # 架构守卫
 cd plugin && npm run build                                    # 插件构建(plugin/ 存在后)
 ```
+
+- 命令假定虚拟环境已激活(环境搭建见 CONTRIBUTING.md)。未激活时用显式
+  解释器:Windows `.venv\Scripts\python.exe`,macOS/Linux `.venv/bin/python`。
 
 - `node --test` 用 ci.yml 里的显式清单,不用目录 glob;新增 `tests/test_*.cjs`
   时同步 ci.yml 的两处(守卫清单与运行清单),守卫会挡住漏登记。
