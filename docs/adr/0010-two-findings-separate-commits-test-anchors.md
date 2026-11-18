@@ -27,6 +27,8 @@ registryCore 用 `.mjs` 纯 ESM 实现(无 Zotero/DOM 全局),由
 
 ## 后果
 
-`tsconfig` 的 `include: ["src"]`(`allowJs` 默认开)自动收录 `.mjs`,类型由同目录的
-`registryCore.d.mts` 提供。需注意:若日后删掉 `d.mts`,`tsc --noEmit` 会退化为 `any`
+`tsconfig` 的 `include: ["src", "typings"]` 不含 `allowJs`(该项默认为 `false`),所以
+`registryCore.mjs` **不在** `tsc` 的编译程序内 —— `tsc --showConfig` 的 `files` 里只有
+`registryCore.d.mts`,没有 `.mjs`;向 `.mjs` 注入类型错误后 `tsc --noEmit` 仍退出 0。
+`registryCore.d.mts` 只给 `registry.ts` 的 import 侧提供类型,`.mjs` 的实现体不被类型检查。需注意:若日后删掉 `d.mts`,`tsc --noEmit` 会退化为 `any`
 而不报错 —— 已在测试注释与 `plugin/AGENTS.md` 内提示「改语义要同时改测试」。
