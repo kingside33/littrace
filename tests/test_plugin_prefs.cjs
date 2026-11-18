@@ -163,11 +163,40 @@ test("the pane binds exactly the visible table rows", async () => {
   assert.match(markup, /id="littrace-prefs-platform" hidden="true"/);
 });
 
+/**
+ * Everything outside comments and outside tags, in one left-to-right pass.
+ *
+ * Deliberately not `markup.replace(/<!--...-->/g, "").replace(/<[^>]*>/g, "")`:
+ * a chain of multi-character replacements is the sanitizer shape that can
+ * produce a new marker for a later rule, and it cannot state the property
+ * this test needs ("no text node anywhere in the pane"). One scanner with one
+ * state transition says exactly what is being measured.
+ */
+function textOutsideTags(markup) {
+  const chunks = [];
+  let index = 0;
+  while (index < markup.length) {
+    const open = markup.indexOf("<", index);
+    if (open === -1) {
+      chunks.push(markup.slice(index));
+      break;
+    }
+    chunks.push(markup.slice(index, open));
+    if (markup.startsWith("<!--", open)) {
+      const end = markup.indexOf("-->", open + 4);
+      index = end === -1 ? markup.length : end + 3;
+    } else {
+      const end = markup.indexOf(">", open + 1);
+      index = end === -1 ? markup.length : end + 1;
+    }
+  }
+  return chunks.join("");
+}
+
 test("the pane markup contains no hardcoded UI text", async () => {
   const markup = read(PANE_XHTML);
-  // Strip comments, then tags: everything left must be whitespace.
-  const withoutComments = markup.replace(/<!--[\s\S]*?-->/g, "");
-  const text = withoutComments.replace(/<[^>]*>/g, "");
+  // Every visible string must come from Fluent, so the pane itself has no text.
+  const text = textOutsideTags(markup);
   assert.equal(text.trim(), "", `unexpected literal text in the pane: ${text.trim()}`);
   // Every visible string is a Fluent reference in the plugin namespace, and
   // each one resolves in both bundles.
