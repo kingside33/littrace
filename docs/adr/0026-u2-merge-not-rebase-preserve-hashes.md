@@ -25,6 +25,13 @@
 
 ## 后果
 
-PR 恢复 `MERGEABLE`,CI 在 `a6e4c49` 上全绿。代价是历史多一个 merge commit,以及
-两处 FTL 与 `registry.ts` 需人工确认「两边都保留」而非一方覆盖;后者的漏检不会被
-现有测试抓住,下一次同类冲突仍需人工按同一纪律处理。
+PR 恢复 `MERGEABLE`,CI 在 `a6e4c49` 上全绿。代价是历史多一个 merge commit。
+
+三处冲突的「一方覆盖」并非无人看管,而是会被现有锚点判红:取无 `createTabHost` 的
+一侧则 `tests/test_plugin_tabs.cjs:357-367` 的源码锚点失败;取无 `createItemSections()`
+的一侧则 `tests/test_plugin_sections.cjs:679-689` 的函数体锚点失败;两份 FTL 保留 U2
+一侧则 4 个 `tab-title-*` 缺失、`tests/test_plugin_tabs.cjs:81-96` 失败,保留 U4 一侧
+则 `section-*` 缺失、`tests/test_plugin_sections.cjs:443-450` 失败。
+
+无法自动校验的是「两边都保留了、但保留的内容被改错」这类语义错误——锚点只确认符号
+与键存在,不确认行为正确;这部分仍需人工按同一纪律处理。
