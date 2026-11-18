@@ -33,6 +33,7 @@ DPAPI 密钥保护本就只在 Windows 提供(`kbapp/core/secrets.py:10-11` 在�
 
 ## 后果
 
-Linux 上这 29 个用例明确 skip,`-rs` 输出里可读到跳过原因;Windows 上仍 455 个用例
-全跑、0 skipped,守护强度不变。代价是 Linux 侧这些路径的真实覆盖为零 —— 要恢复覆盖,
-需要先有 platform adapter,已作为后续排期事项而非本次修补内容。
+Linux 上这 29 个用例明确 skip,`-rs` 输出里可读到跳过原因;Windows 上仍全跑、
+0 skipped(C1 合并后为 460 passed,数量以当次 CI 日志为准),守护强度不变。代价是
+Linux 侧这些路径的真实覆盖为零 —— 要恢复覆盖,需要先有 platform adapter,已作为后续
+排期事项而非本次修补内容。
