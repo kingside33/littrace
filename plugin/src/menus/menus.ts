@@ -11,11 +11,12 @@ import { openFunctionTab } from "../tabs/tabs";
 import {
   EMPTY_COMPARE_SET,
   FEEDBACK_KEYS,
+  GATE_REASON_KEYS,
   PROBE_TTL_MS,
   compareAddFeedback,
-  compareRunRequest,
-  compareSetAdd,
   compareReadiness,
+  compareRunBody,
+  compareSetAdd,
   createVerdictCache,
   entryStateOf,
   guideView,
@@ -23,6 +24,7 @@ import {
   menuSpecs,
   paperIdOf,
   registeredEntries,
+  resolutionOutcome,
   serviceStateOf,
   targetsOf,
 } from "./menuCore.mjs";
@@ -355,12 +357,102 @@ function runCompareClear(window: Window): void {
   feedback(window, FEEDBACK_KEYS.compareCleared);
 }
 
+/**
+ * The service's own error text, for the feedback line.
+ *
+ * `ServiceClientError` carries the service's `detail` (e.g. 「论文范围包含不
+ * 存在的节点」) and the HTTP status. Showing that beats a generic 「未确认」,
+ * which sends the user to a dashboard that has nothing in it.
+ */
+function errorDetail(error: unknown): string {
+  const detail = (error as { detail?: unknown })?.detail;
+  if (typeof detail === "string" && detail.trim()) {
+    return detail.trim();
+  }
+  const status = Number((error as { status?: unknown })?.status);
+  if (Number.isInteger(status) && status > 0) {
+    return `HTTP ${status}`;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** One target's service-side resolution. */
+type ResolveResult =
+  | { ok: true; paperId: string }
+  | { ok: false; missing: boolean; detail: string };
+
+/**
+ * Resolve one plugin paper key (`z:<libraryID>:<key>`) to the id the service's
+ * write paths look up.
+ *
+ * `/api/documents/process` and `/api/agent-runs` both go through
+ * `store.resolve()`, which only maps `z:<lib>:<key>` when that string is the
+ * stored id; a paper stored under a legacy `doi:` id is otherwise returned
+ * unchanged and the endpoint answers 400 for the whole request. Reading
+ * `/api/v2/paper/sections` returns the resolved `paper_id`, and a 404 means
+ * the paper is not in the library at all (U2's parse button follows the same
+ * rule).
+ */
+async function resolvePaperId(paper: string): Promise<ResolveResult> {
+  try {
+    const snapshot = await addon.service.get(
+      `/api/v2/paper/sections?paper=${encodeURIComponent(paper)}`,
+    );
+    const resolved =
+      snapshot && typeof snapshot.paper_id === "string"
+        ? snapshot.paper_id.trim()
+        : "";
+    if (resolved) {
+      return { ok: true, paperId: resolved };
+    }
+    return { ok: false, missing: true, detail: "" };
+  } catch (error) {
+    const status = Number((error as { status?: unknown })?.status);
+    return {
+      ok: false,
+      missing: status === 404,
+      detail: errorDetail(error),
+    };
+  }
+}
+
 async function runCompareRun(window: Window): Promise<void> {
-  const request = compareRunRequest(compareEntries);
-  if (!request) {
+  const readiness = compareReadiness(compareEntries);
+  if (!readiness.ready) {
     // The entry is gated on the same condition, so this is the "state moved
     // between showing and clicking" path; say why instead of doing nothing.
-    feedback(window, compareReadiness(compareEntries).reasonKey ?? FEEDBACK_KEYS.selectFirst);
+    feedback(window, readiness.reasonKey ?? FEEDBACK_KEYS.selectFirst);
+    return;
+  }
+  // Resolve every paper first: one unresolvable `z:` id makes the service
+  // reject the whole compare run (400 「论文范围包含不存在的节点」), which would
+  // hide the papers it could have used.
+  const pairs: Array<{ paperId: string; resolvedId: string | null }> = [];
+  let failure: { missing: boolean; detail: string } | null = null;
+  for (const target of compareEntries) {
+    const paperId = paperIdOf(target);
+    const resolved = await resolvePaperId(paperId);
+    pairs.push({ paperId, resolvedId: resolved.ok ? resolved.paperId : null });
+    if (!resolved.ok && failure === null) {
+      failure = { missing: resolved.missing, detail: resolved.detail };
+    }
+  }
+  const outcome = resolutionOutcome(pairs);
+  if (outcome.missing.length > 0) {
+    // 404 = not in the library (the user must index it); anything else is the
+    // service's own error, which is shown instead of being called 「未确认」.
+    if (failure && !failure.missing) {
+      feedback(window, FEEDBACK_KEYS.compareError, { detail: failure.detail });
+    } else {
+      feedback(window, FEEDBACK_KEYS.compareUnindexed, {
+        count: outcome.missing.length,
+      });
+    }
+    return;
+  }
+  const request = compareRunBody(outcome.resolved);
+  if (!request) {
+    feedback(window, GATE_REASON_KEYS["compare-size"] ?? FEEDBACK_KEYS.selectFirst);
     return;
   }
   try {
@@ -376,7 +468,7 @@ async function runCompareRun(window: Window): Promise<void> {
     openTab(window, "research");
   } catch (error) {
     report(error, "提交对比");
-    feedback(window, FEEDBACK_KEYS.compareUnknown);
+    feedback(window, FEEDBACK_KEYS.compareError, { detail: errorDetail(error) });
   }
 }
 

@@ -380,6 +380,28 @@ test("the comparison set is 2–4 papers, deduped, and never silently evicts", a
     null,
   );
 
+  // The submitted ids are the resolved ones, deduped; a run whose papers
+  // collapse to fewer than two is refused locally instead of 400ing.
+  assert.deepEqual(
+    core.compareRunBody(["doi:10.1/a", "doi:10.1/b", "doi:10.1/a"]).body.paper_ids,
+    ["doi:10.1/a", "doi:10.1/b"],
+  );
+  assert.equal(core.compareRunBody(["doi:10.1/a"]), null);
+  assert.equal(core.compareRunBody(["a", "b", "c", "d", "e"]), null);
+  assert.equal(core.compareRunBody([]), null);
+
+  // One unresolvable paper must not be silently dropped: the edge resolves
+  // every target and refuses the whole run with the specific reason.
+  const outcome = core.resolutionOutcome([
+    { paperId: "z:1:A", resolvedId: "z:1:A" },
+    { paperId: "z:1:GHOST", resolvedId: null },
+    { paperId: "z:1:LEGACY", resolvedId: "doi:10.1/legacy" },
+    { paperId: "", resolvedId: "ignored" },
+  ]);
+  assert.deepEqual(outcome.resolved, ["z:1:A", "doi:10.1/legacy"]);
+  assert.deepEqual(outcome.missing, ["z:1:GHOST"]);
+  assert.deepEqual(core.resolutionOutcome(undefined).missing, []);
+
   // The service's own bound, read from its source: a drift on either side
   // must fail this test instead of turning into a 400 for the user.
   const server = read(AGENTS_PY);
@@ -575,6 +597,22 @@ test("no visible menu string is hardcoded in the TypeScript edge", () => {
   assert.match(menus, /t\(entry\.labelKey\)/);
   assert.match(menus, /t\(view\.titleKey\)/);
   assert.match(menus, /t\(key, args\)/);
+});
+
+test("a compare run resolves every paper before it is submitted", () => {
+  const menus = read(MENU_TS);
+  // A bare `z:<lib>:<key>` only resolves when it is the stored id; a paper
+  // under a legacy `doi:` id otherwise makes the service 400 the whole run.
+  // The edge therefore resolves each target first (same two-hop as parse).
+  assert.match(menus, /await resolvePaperId\(paperId\)/);
+  assert.match(menus, /\/api\/v2\/paper\/sections\?paper=\$\{encodeURIComponent\(paper\)\}/);
+  assert.match(menus, /compareRunBody\(outcome\.resolved\)/);
+  // An unindexed paper is named as such; a service error shows its own text
+  // instead of being reported as 「未确认」.
+  assert.match(menus, /FEEDBACK_KEYS\.compareUnindexed/);
+  assert.match(menus, /FEEDBACK_KEYS\.compareError/);
+  assert.match(menus, /detail: errorDetail\(error\)/);
+  assert.match(menus, /resolvePaperId\(paperId\)/);
 });
 
 test("the pure core has no Zotero or DOM globals", () => {

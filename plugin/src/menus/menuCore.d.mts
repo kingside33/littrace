@@ -97,6 +97,13 @@ export type CompareRunRequest = {
   body: { kind: "compare"; paper_ids: string[] };
 };
 
+export type ResolutionPair = { paperId: string; resolvedId: string | null };
+
+export type ResolutionOutcome = {
+  resolved: ReadonlyArray<string>;
+  missing: ReadonlyArray<string>;
+};
+
 export type TargetsResult = {
   targets: ReadonlyArray<PaperTarget>;
   skipped: number;
@@ -162,6 +169,8 @@ export declare function compareSetRemove(
 export declare function compareSetPaperIds(entries: CompareSet): string[];
 export declare function compareReadiness(entries: CompareSet | ReadonlyArray<unknown>): CompareReadiness;
 export declare function compareRunRequest(entries: CompareSet | ReadonlyArray<unknown>): CompareRunRequest | null;
+export declare function compareRunBody(paperIds: ReadonlyArray<string>): CompareRunRequest | null;
+export declare function resolutionOutcome(pairs: ReadonlyArray<ResolutionPair | null>): ResolutionOutcome;
 export declare function normalizeSelection(
   value: unknown,
 ): SelectionCount;

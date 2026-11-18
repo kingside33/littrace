@@ -466,22 +466,77 @@ export function compareReadiness(entries) {
 }
 
 /**
- * The compare-run submission, or null when the set is not in 2–4.
+ * The compare-run submission for already-resolved paper ids, or null when the
+ * resolved set is not in 2–4.
  *
- * The body mirrors `create_run()`: `kind: "compare"` plus `paper_ids`. The
- * service resolves the ids through `store.resolve()`, so they stay in the
- * `z:<libraryID>:<key>` form the rest of the plugin uses.
+ * `paper_ids` must be ids the service can resolve: `z:<libraryID>:<key>` only
+ * names a paper when the stored id is that exact string, and a paper stored
+ * under a legacy `doi:` id is not reachable through it
+ * (`kbapp/storage/store.py`: the aliases table holds id / citekey /
+ * openalex_id / doi, and `store.resolve()` otherwise returns the input
+ * unchanged). The edge therefore resolves every target through
+ * `GET /api/v2/paper/sections` first and submits the resolved `paper_id`s.
  */
-export function compareRunRequest(entries) {
-  if (!compareReadiness(entries).ready) {
+export function compareRunBody(paperIds) {
+  const list = Array.isArray(paperIds) ? paperIds : [];
+  const ids = [];
+  const seen = new Set();
+  for (const raw of list) {
+    const id = typeof raw === "string" ? raw.trim() : "";
+    if (!id || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    ids.push(id);
+  }
+  if (ids.length < COMPARE_MIN || ids.length > COMPARE_MAX) {
     return null;
   }
   return Object.freeze({
     path: "/api/agent-runs",
-    body: Object.freeze({
-      kind: "compare",
-      paper_ids: compareSetPaperIds(entries),
-    }),
+    body: Object.freeze({ kind: "compare", paper_ids: Object.freeze(ids) }),
+  });
+}
+
+/**
+ * The compare-run submission for a comparison set in the plugin's own
+ * `z:<libraryID>:<key>` form, or null when the set is not in 2–4.
+ */
+export function compareRunRequest(entries) {
+  return compareRunBody(compareSetPaperIds(entries));
+}
+
+/**
+ * Split per-target resolution results into the ids the service can reach and
+ * the targets it cannot.
+ *
+ * `pairs` is one `{ paperId, resolvedId }` per target, in set order;
+ * `resolvedId` is the service's `paper_id` (from `/api/v2/paper/sections`) or
+ * null/empty when the paper is not in the library. The caller must not submit
+ * a partially resolved run: a `z:` id the service cannot resolve makes
+ * `create_run()` answer 400 for the whole run, which would hide the actually
+ * usable papers.
+ */
+export function resolutionOutcome(pairs) {
+  const list = Array.isArray(pairs) ? pairs : [];
+  const resolved = [];
+  const missing = [];
+  for (const pair of list) {
+    const paperId = typeof pair?.paperId === "string" ? pair.paperId : "";
+    const resolvedId =
+      typeof pair?.resolvedId === "string" ? pair.resolvedId.trim() : "";
+    if (!paperId) {
+      continue;
+    }
+    if (resolvedId) {
+      resolved.push(resolvedId);
+    } else {
+      missing.push(paperId);
+    }
+  }
+  return Object.freeze({
+    resolved: Object.freeze(resolved),
+    missing: Object.freeze(missing),
   });
 }
 
@@ -709,6 +764,8 @@ export const FEEDBACK_KEYS = Object.freeze({
   compareCleared: "menu-feedback-compare-cleared",
   compareSubmitted: "menu-feedback-compare-submitted",
   compareUnknown: "menu-feedback-compare-unknown",
+  compareUnindexed: "menu-feedback-compare-unindexed",
+  compareError: "menu-feedback-compare-error",
   parseSubmitted: "menu-feedback-parse-submitted",
   parseUnknown: "menu-feedback-parse-unknown",
   diagnosticsUnavailable: "menu-feedback-diagnostics-unavailable",
