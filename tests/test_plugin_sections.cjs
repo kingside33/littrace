@@ -150,6 +150,44 @@ test("the snapshot path encodes the key as one query value", async () => {
   assert.throws(() => snapshotPath(""), TypeError);
 });
 
+/* ── 1b. Follow-up requests use the resolved paper id ────────────────── */
+
+test("the workbench URL puts the paper in the query, before the hash", async () => {
+  const { workbenchUrl } = await core();
+  // shell.js:59 reads `pid` from location.search and the page from
+  // location.hash.slice(1). `#search?paper=…` would make the page name
+  // "search?paper=…", which is not in titleNames, so page() falls through to
+  // 研究调度台 and replaceState wipes the paper. Query must come first.
+  assert.equal(
+    workbenchUrl("http://127.0.0.1:8765", "search", "doi:10.1234/legacy"),
+    "http://127.0.0.1:8765/?paper=doi%3A10.1234%2Flegacy#search",
+  );
+  const url = workbenchUrl("http://127.0.0.1:8765/", "graph", "z:1:KEY");
+  assert.ok(url.indexOf("?paper=") < url.indexOf("#graph"), "query must precede the hash");
+  assert.equal(url, "http://127.0.0.1:8765/?paper=z%3A1%3AKEY#graph");
+  // A trailing slash on the base must not produce a double slash.
+  assert.match(workbenchUrl("http://127.0.0.1:8765///", "search", "x"), /^http:\/\/127\.0\.0\.1:8765\/\?paper=x#search$/);
+  // No paper still yields a usable page URL.
+  assert.equal(workbenchUrl("http://127.0.0.1:8765", "search", ""), "http://127.0.0.1:8765/#search");
+  assert.throws(() => workbenchUrl("", "search", "x"), TypeError);
+  assert.throws(() => workbenchUrl("http://h", "", "x"), TypeError);
+});
+
+test("follow-up requests use the resolved paper id, not the lookup key", async () => {
+  const { paperIdFor, readyState, loadingState } = await core();
+  // A legacy-id paper: the cache key resolves to a different paper id.
+  const legacy = readyState("reading", "z:1:ITEM0001", snapshot({
+    paper_id: "doi:10.1234/legacy",
+  }));
+  assert.equal(paperIdFor(legacy), "doi:10.1234/legacy");
+  // /api/documents/process does papers().get(store.resolve(id)); store.resolve
+  // does not map z:<lib>:<key>, so passing the key would 400.
+  assert.notEqual(paperIdFor(legacy), legacy.cacheKey);
+  // Without a snapshot there is nothing resolved yet — fall back to the key.
+  assert.equal(paperIdFor(loadingState("z:1:KEY")), "z:1:KEY");
+  assert.equal(paperIdFor(null), "");
+});
+
 /* ── 2. Lazy loading + cache ─────────────────────────────────────────── */
 
 test("a cache hit issues no request", async () => {

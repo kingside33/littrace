@@ -87,6 +87,8 @@ export declare const PANEL_STATES: {
 
 export declare function cacheKeyFor(item: ItemRef | null, defaults?: { libraryID?: number }): string;
 export declare function snapshotPath(cacheKey: string): string;
+export declare function paperIdFor(state: PanelState | null): string;
+export declare function workbenchUrl(baseUrl: string, page: string, paperId: string): string;
 export declare function loadingState(cacheKey: string): PanelState;
 export declare function idleState(): PanelState;
 export declare function offlineState(cacheKey: string): PanelState;

@@ -8,10 +8,12 @@ import {
   createRenderGeneration,
   createSectionRegistration,
   idleState,
+  paperIdFor,
   planRender,
   sectionRows,
   settleRender,
   snapshotPath,
+  workbenchUrl,
 } from "./itemSectionsCore.mjs";
 import type {
   PanelCache,
@@ -253,7 +255,7 @@ function renderSnapshot(
     const open = element(doc, "button", `${ROOT_CLASS}-action`);
     open.type = "button";
     open.textContent = t("section-open-search");
-    open.addEventListener("click", () => openSearch(state.cacheKey));
+    open.addEventListener("click", () => openSearch(state));
     box.append(open);
   }
 
@@ -283,25 +285,30 @@ function renderSnapshot(
 
 /**
  * Entry points into the service UI. Both open the local workbench with the
- * paper preselected: shell.js reads `?paper=` on startup and opens the detail
- * view, which is why the paper is passed as a query parameter and not a hash.
+ * paper preselected. The URL shape is decided by `workbenchUrl()`: shell.js:59
+ * reads the paper from `location.search` and the page from the hash, so the
+ * query must come *before* the hash (`/?paper=…#graph`) — a `?paper=` inside
+ * the hash is not parsed and the page falls through to 研究调度台.
+ *
+ * The paper id is the *resolved* one from the snapshot, not the plugin's
+ * lookup key: `/api/paper` resolves through `store.resolve()`, which does not
+ * map `z:<lib>:<key>` for a paper whose stored id is a legacy `doi:` form.
  *
  * The tab host is U4's job; until it exists this opens the default browser,
  * which is honest — the section itself is complete and never pretends to have
  * in-app navigation it does not have.
  */
-function openSearch(cacheKey: string): void {
-  openWorkbench("search", cacheKey);
+function openSearch(state: PanelState): void {
+  openWorkbench("search", state);
 }
 
-function openLineage(cacheKey: string): void {
-  openWorkbench("graph", cacheKey);
+function openLineage(state: PanelState): void {
+  openWorkbench("graph", state);
 }
 
-function openWorkbench(page: string, cacheKey: string): void {
+function openWorkbench(page: string, state: PanelState): void {
   try {
-    const base = addon.service.baseUrl;
-    Zotero.launchURL(`${base}/#${page}?paper=${encodeURIComponent(cacheKey)}`);
+    Zotero.launchURL(workbenchUrl(addon.service.baseUrl, page, paperIdFor(state)));
   } catch (error) {
     Zotero.logError(
       error instanceof Error
@@ -394,9 +401,9 @@ function renderState(
     case "offline":
       body.append(renderNote(doc, state, (actionKey) => {
         if (actionKey === "section-open-lineage") {
-          openLineage(state.cacheKey);
+          openLineage(state);
         } else {
-          openSearch(state.cacheKey);
+          openSearch(state);
         }
       }));
       return token;

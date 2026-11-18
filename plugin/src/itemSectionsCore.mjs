@@ -61,6 +61,46 @@ export function snapshotPath(cacheKey) {
 }
 
 /**
+ * Paper id to use when talking to *other* endpoints (`/api/paper`,
+ * `/api/documents/process`).
+ *
+ * The lookup key is the plugin's own `z:<libraryID>:<itemKey>`, which the
+ * service resolves to the real paper id only inside `/api/v2/paper/sections`.
+ * For a paper whose stored id is a legacy `doi:` form, `store.resolve()` does
+ * NOT resolve `z:1:KEY`, so passing the cache key onward would 404 the detail
+ * view and 400 the parse job. The snapshot already carries the resolved id, so
+ * every follow-up request uses that whenever it is available.
+ */
+export function paperIdFor(state) {
+  const snapshotId = state && state.snapshot && state.snapshot.paper_id;
+  if (typeof snapshotId === "string" && snapshotId.trim().length > 0) {
+    return snapshotId.trim();
+  }
+  return state && typeof state.cacheKey === "string" ? state.cacheKey : "";
+}
+
+/**
+ * Workbench URL for the two entry points.
+ *
+ * `shell.js:59` reads the paper from `location.search` and the page from
+ * `location.hash.slice(1)`, so the query MUST precede the hash:
+ * `http://host/?paper=ID#graph`. Putting `?paper=` inside the hash (as an
+ * earlier version did) makes `hash.slice(1)` equal `search?paper=…`, which is
+ * not in `core.js`'s titleNames, so `page()` falls through to 研究调度台 and its
+ * `replaceState` then rewrites the hash, losing the paper entirely.
+ */
+export function workbenchUrl(baseUrl, page, paperId) {
+  const base = String(baseUrl || "").replace(/\/+$/, "");
+  const target = String(page || "").trim();
+  if (!base || !target) {
+    throw new TypeError("littrace item sections: workbenchUrl needs a base URL and a page");
+  }
+  const paper = typeof paperId === "string" ? paperId.trim() : "";
+  const query = paper ? `?paper=${encodeURIComponent(paper)}` : "";
+  return `${base}/${query}#${target}`;
+}
+
+/**
  * Empty state with the "go index it" lead-in stated as data, so the renderer
  * never has to guess whether an empty section is a success or a failure.
  */
