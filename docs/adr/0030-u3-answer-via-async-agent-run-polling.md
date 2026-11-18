@@ -20,9 +20,12 @@
   (`kbapp/web/research_api.py:24-27`);
 - `GET /api/agent-runs/{id}` 轮询终态(`kbapp/web/research_api.py:29-32`)。
 
-单次请求都在超时纪律内。`run.result` 里的 `role` 与 `processed` / `total` 映射成
-一行**单调不减**的进度条(`plugin/src/readerPanelCore.mjs:934-937` 做 clamp);
-到终态后再取 `run.result` 映射成答案卡片。
+单次请求都在超时纪律内。**run 顶层**的 `processed` / `total`(由 `get_run` 计算
+并加到 run 对象上,`kbapp/workflows/agents.py:44,46`)与 **`run.result` 里的
+`role`**(`agents.py:47-50` 只把 `summary` 并到顶层,`role` 留在 `result`)映射成
+一行**单调不减**的进度条(`plugin/src/readerPanelCore.mjs:934-937` 对顶层
+`snapshot.total` / `snapshot.processed` 做 clamp,`:921-922` 读
+`snapshot.result.role`);到终态后再取 `run.result` 映射成答案卡片。
 
 ## 备选
 
