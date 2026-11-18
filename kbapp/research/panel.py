@@ -115,13 +115,24 @@ def resolve(store, value):
 
 
 def evidence(store, paper_id):
-    """已索引证据：按 kind 计数 + 少量摘要；索引未发布时 indexed=False。"""
+    """已索引证据：按 kind 计数 + 少量摘要；索引未发布时 indexed=False。
+
+    只统计 ``EVIDENCE_KINDS``。语料里还有 Zotero 笔记/批注与 Obsidian 卡片笔记
+    (``kbapp/search/indexing.py`` 会把 ``notes + note_sources`` 写进 corpus,
+    ``kbapp/library/sources.py:64`` 让这些行的 ``paper_id`` 指向该文献),
+    它们不是证据:把它们并进计数会让「已索引」总数虚高,而插件侧按
+    ``evidence-kind-<kind>`` 查 FTL 查不到对应文案,会把原始 l10n key
+    直接显示给用户。前端只认这五种 kind,所以口径也在这里收窄。
+    """
     index = corpus_index(store)
     if index is None:
         return {'indexed': False, 'index_version': None, 'counts': {}, 'total': 0, 'excerpts': []}
     entry = index.get(paper_id) or {'counts': {}, 'excerpts': []}
-    counts = {kind: int(entry['counts'].get(kind, 0)) for kind in EVIDENCE_KINDS if entry['counts'].get(kind)}
-    counts.update({kind: int(value) for kind, value in entry['counts'].items() if kind not in counts})
+    counts = {
+        kind: int(entry['counts'][kind])
+        for kind in EVIDENCE_KINDS
+        if entry['counts'].get(kind)
+    }
     total = sum(counts.values())
     return {
         'indexed': total > 0,

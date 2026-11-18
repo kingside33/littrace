@@ -12,6 +12,7 @@
 """
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -69,6 +70,16 @@ class PaperSections(unittest.TestCase):
              'text': 'J = sum(c_i)'},
             {'id': 'text:3', 'paper_id': PEER_ID, 'kind': 'paper_text', 'page_start': 1,
              'text': 'peer text'},
+            # 语料里还有非证据来源(kbapp/search/indexing.py 写入 notes +
+            # note_sources),它们的 paper_id 同样指向该文献。它们不能算进
+            # 「已索引证据」,否则计数虚高,且插件侧按 evidence-kind-<kind>
+            # 查不到 FTL 会把原始 key 显示给用户。
+            {'id': 'zn:' + PAPER_ID, 'paper_id': PAPER_ID, 'kind': 'zotero_note',
+             'text': '我的阅读笔记'},
+            {'id': 'zn2:' + PAPER_ID, 'paper_id': PAPER_ID, 'kind': 'zotero_annotation',
+             'text': '批注'},
+            {'id': 'on:' + PAPER_ID, 'paper_id': PAPER_ID, 'kind': 'obsidian_note',
+             'text': '卡片笔记'},
         ]
         (version / 'corpus.jsonl').write_text(
             ''.join(json.dumps(row, ensure_ascii=False) + '\n' for row in rows), encoding='utf-8')
@@ -110,6 +121,9 @@ class PaperSections(unittest.TestCase):
         self.assertEqual(evidence['index_version'], 'v1')
         self.assertEqual(evidence['counts'], {'paper_text': 2, 'figure': 1, 'formula': 1})
         self.assertEqual(evidence['total'], 4)
+        # 笔记/批注不是证据:既不计入 counts,也不抬 total。
+        for note_kind in ('zotero_note', 'zotero_annotation', 'obsidian_note'):
+            self.assertNotIn(note_kind, evidence['counts'])
         self.assertEqual(len(evidence['excerpts']), 2)
         self.assertTrue(all(item['excerpt'] for item in evidence['excerpts']))
 
@@ -164,6 +178,31 @@ class PaperSections(unittest.TestCase):
         reading = response.json()['reading']
         self.assertEqual(reading['state'], 'stale')
         self.assertIn('PDF、模型或提示版本已变化，需重新理解', reading['gaps'])
+
+    def test_every_emitted_kind_has_a_label_in_both_locale_packs(self):
+        """接口能吐出的 kind,插件两份 FTL 都必须有对应文案。
+
+        插件按 evidence-kind-<kind> / reading-class-<CLASS> 查文案;查不到时
+        t() 会把原始 key 直接显示给用户。这里把「服务端可能吐出的所有值」
+        与 FTL 对齐,数据驱动的漏文案就会在 pytest 阶段暴露,而不是等到真机。
+        """
+        from kbapp.research.panel import EVIDENCE_KINDS
+        repo = Path(__file__).resolve().parents[1]
+        packs = {
+            locale: (repo / 'plugin' / 'addon' / 'locale' / locale / 'addon.ftl').read_text(encoding='utf-8')
+            for locale in ('en-US', 'zh-CN')
+        }
+        # document_pages.classification 的取值域见 kbapp/storage/schema.py 的 CHECK。
+        classes = ('NATIVE_TEXT', 'SCANNED', 'MIXED', 'LOW_QUALITY', 'FAILED')
+        reading_states = ('unparsed', 'partial', 'complete', 'stale')
+        for locale, ftl in packs.items():
+            defined = set(re.findall(r'^([a-zA-Z0-9_-]+) =', ftl, re.M))
+            for kind in EVIDENCE_KINDS:
+                self.assertIn(f'evidence-kind-{kind}', defined, f'{locale} 缺 evidence-kind-{kind}')
+            for name in classes:
+                self.assertIn(f'reading-class-{name}', defined, f'{locale} 缺 reading-class-{name}')
+            for state in reading_states:
+                self.assertIn(f'section-reading-state-{state}', defined, f'{locale} 缺 section-reading-state-{state}')
 
 
 if __name__ == '__main__':
