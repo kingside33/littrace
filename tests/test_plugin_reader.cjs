@@ -713,6 +713,30 @@ test("the answer request refuses an over-long question instead of truncating it"
   assert.equal(mod.askRunRequest("问".repeat(mod.QUESTION_MAX)).kind, "run");
 });
 
+test("a selection longer than the service limit is refused locally, not sent as a 422", async () => {
+  const mod = await core();
+
+  // /api/v2/search's `q` is Query(min_length=1, max_length=2000)
+  // (kbapp/web/v2_api.py:29), and a 422's `detail` is an array that the S4
+  // client cannot render, so an over-long selection would produce an
+  // unreadable error plus a retry that always fails the same way.
+  const long = "摘".repeat(mod.QUESTION_MAX + 1);
+  assert.throws(
+    () => mod.evidenceSearchRequest(long),
+    /不能超过/,
+    "the evidence path must carry the same guard as the answer path",
+  );
+  assert.throws(() => mod.requestFor("evidence", long), /不能超过/);
+
+  const atLimit = mod.evidenceSearchRequest("摘".repeat(mod.QUESTION_MAX));
+  assert.equal(atLimit.shape, "evidence", "exactly at the limit is still accepted");
+  assert.ok(
+    new URL(atLimit.path, "http://127.0.0.1:8765").searchParams.get("q").length ===
+      mod.QUESTION_MAX,
+    "nothing is silently truncated on the way out",
+  );
+});
+
 test("a real answer response becomes an answer card with page-bearing badges", async () => {
   const mod = await core();
   const outcome = mod.answerOutcome(answerRun().result);

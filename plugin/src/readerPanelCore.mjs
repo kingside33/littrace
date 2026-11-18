@@ -750,9 +750,19 @@ export function askRunRequest(question, { paperId = "" } = {}) {
  *
  * `wait_vectors=false`：等向量会拖到超过请求超时；先拿关键词结果，
  * 服务端在 warning 里说明向量还没就绪，那条 warning 会变成缺口卡片。
+ *
+ * 与 askRunRequest 一样套 QUESTION_MAX 守卫：`/api/v2/search` 的 `q` 是
+ * `Query(min_length=1, max_length=2000)`（kbapp/web/v2_api.py:29），超长划词
+ * 必然 422；而 422 的 detail 是数组，S4 客户端的 readDetail 只认字符串
+ * （plugin/src/serviceClientCore.mjs:473-483），卡片只会显示「服务返回 422」
+ * 并给出一个每次都以同样方式失败的重试。宁可本地拒绝并说清原因。
+ * 3000 字中文的 q 还会生成约 27KB 的 URL，也不该发出去。
  */
 export function evidenceSearchRequest(selection, { paperId = "", limit = 6 } = {}) {
   const query = requireQuestion(selection);
+  if (query.length > QUESTION_MAX) {
+    throw new Error(`littrace: 选中的正文不能超过 ${QUESTION_MAX} 字符`);
+  }
   const search = requestParams([
     ["q", query],
     ["k", limit],
