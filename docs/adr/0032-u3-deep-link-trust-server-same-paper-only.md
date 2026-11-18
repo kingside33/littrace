@@ -36,5 +36,6 @@
 跨文献命中的徽标可能不可点,但卡片本身仍有页码可读——信息没有丢,只是不假装
 能跳。可点性在视图模型里由 `href` 是否为 `null` 决定,可以直接测试断言。
 
-桥接不可用时降级为**复制深链文本**并给可见提示
-(`jumpPlan()`,`plugin/src/readerPanelCore.mjs:1381-1390`),不静默失败。
+桥接不可用时降级为**复制深链文本**并给可见提示(判定
+`jumpPlan()`,`plugin/src/readerPanelCore.mjs:1369-1377`;执行侧
+`activateJump()` → `copyLink()`,`plugin/src/readerPanel.ts:918-930`),不静默失败。
