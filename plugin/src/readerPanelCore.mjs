@@ -1169,12 +1169,30 @@ export function lineageOutcome(payload, { paperId = "" } = {}) {
     const otherId = src === self ? dst : dst === self ? src : dst || src;
     const other = nodes.get(otherId) ?? {};
     const label = RELATION_LABELS[textOf(edge.kind)] || textOf(edge.kind);
-    const parts = [`与《${nodeTitle(other, otherId)}》的关系：${label}`];
+    // Direction matters: the service writes explanation/change with the edge's
+    // `src` as the subject (kbapp/research/relations.py:165 pins "src 必须是
+    // 主论文id"), so when the current paper is `dst` those sentences describe
+    // the OTHER paper, not this one. The workbench renders the same split
+    // explicitly (kbapp/web/assets/modules/graph.js:371, older=dst/later=src).
+    const selfIsSrc = src === self;
+    const otherTitle = `《${nodeTitle(other, otherId)}》`;
+    const parts = [
+      selfIsSrc
+        ? `本篇 → ${otherTitle}：${label}`
+        : `${otherTitle} → 本篇：${label}`,
+    ];
     if (textOf(edge.explanation)) {
       parts.push(textOf(edge.explanation));
+      if (!selfIsSrc) {
+        parts.push("（以上描述以对方文献为主语）");
+      }
     }
     if (textOf(edge.change)) {
-      parts.push(`具体改变：${textOf(edge.change)}`);
+      parts.push(
+        selfIsSrc
+          ? `具体改变：${textOf(edge.change)}`
+          : `对方的改变：${textOf(edge.change)}`,
+      );
     }
     if (textOf(edge.conditions)) {
       parts.push(`适用条件：${textOf(edge.conditions)}`);

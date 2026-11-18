@@ -1065,7 +1065,8 @@ test("a real graph response becomes lineage cards with page-bearing citations", 
 
   assert.equal(outcome.ok, true);
   assert.equal(outcome.conclusions.length, 1);
-  assert.match(outcome.conclusions[0].text, /与《LaValle1998》的关系：具体改进/);
+  assert.match(outcome.conclusions[0].text, /本篇 → 《LaValle1998》：具体改进/);
+  assert.match(outcome.conclusions[0].text, /具体改变：插入后重连/);
   assert.match(outcome.conclusions[0].text, /证据等级：原文已核 · 模型复核/);
   assert.equal(outcome.conclusions[0].citations[0].page, 7);
   assert.equal(outcome.evidence.length, 1);
@@ -1106,6 +1107,45 @@ test("a paper with no lineage says which kind of nothing it is", async () => {
     citationsOnly.gaps.join(" "),
     /只有引用关系/,
     "a citation is not a method relation, and the gap must say so",
+  );
+});
+
+test("a current paper that is the edge's dst keeps the direction on the other side", async () => {
+  const mod = await core();
+  // Opening the PREDECESSOR's PDF: the edge is src=successor, dst=this paper.
+  // The service writes explanation/change with src as the subject
+  // (kbapp/research/relations.py:165), so those sentences are about the
+  // successor and must not be presented as this paper's own change.
+  const outcome = mod.lineageOutcome(
+    {
+      nodes: [
+        { id: "z:1:OLDER001", citekey: "LaValle1998", year: 1998 },
+        { id: "z:1:NEWER001", citekey: "Karaman2011", year: 2011 },
+      ],
+      edges: [
+        {
+          src: "z:1:NEWER001",
+          dst: "z:1:OLDER001",
+          kind: "improves",
+          status: "confirmed",
+          explanation: "后作在 RRT 的基础上加入重连步骤。",
+          change: "插入后重连",
+          evidence: [],
+          evidence_label: "原文已核 · 模型复核",
+        },
+      ],
+    },
+    { paperId: "z:1:OLDER001" },
+  );
+
+  const text = outcome.conclusions[0].text;
+  assert.match(text, /《Karaman2011》 → 本篇：具体改进/, "the arrow names who did the improving");
+  assert.match(text, /以上描述以对方文献为主语/, "the service's subject is stated, not silently adopted");
+  assert.match(text, /对方的改变：插入后重连/, "the change belongs to the other paper");
+  assert.doesNotMatch(
+    text,
+    /本篇 → 《Karaman2011》/,
+    "a dst-side edge must not be rendered as if this paper were the earlier source",
   );
 });
 
