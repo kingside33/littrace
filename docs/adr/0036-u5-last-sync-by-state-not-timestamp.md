@@ -7,10 +7,11 @@
 
 评审 PR #36 的 finding(`plugin/src/status/statusCore.mjs:304`)。
 
-`sync_exports()` 一轮里**写三次** `export_sync`:`running` → `synced` 或 `failed`
-(`kbapp/workflows/publication.py:44-55`),三次都刷新 `updated`。只读 `updated`
-会把一次**失败**的同步读成成功,显示成绿色的「上次同步 <时刻>」;而该行原先固定
-`tone: ok`,也不进「失败项」清单——两个误导叠加。
+`sync_exports()` 一轮里**写两次** `export_sync`:先写 `running`
+(`kbapp/workflows/publication.py:45`),再写 `synced`(`:52`,经 `:60` 落库)或
+`failed`(`:54-55`)二选一。**两次都刷新 `updated`**,所以只看时间戳分不清成败。
+只读 `updated` 会把一次**失败**的同步读成成功,显示成绿色的「上次同步 <时刻>」;
+而该行原先固定 `tone: ok`,也不进「失败项」清单——两个误导叠加。
 
 ## 决策
 
