@@ -38,9 +38,21 @@
 
 ## 后果
 
-面板与工作台共用同一条链路与同一套状态词表(`kbapp/workflows/states.py:22-24`
-的 `STATES` / `TERMINAL` / `ACTIVE`),服务端状态词一变两边同时变,不会出现两套
-措辞。
+面板与工作台共用同一条链路与同一套状态**词**,但词表是**字面量副本,不是共享
+常量**:权威定义在 `kbapp/workflows/states.py:22-24`,插件侧两处硬编码副本
+(`serviceClientCore.mjs:35-41` 的 `TERMINAL_STATUSES`、
+`readerPanelCore.mjs:750-757` 的 `RUN_ACTIVE_STATES` / `RUN_TERMINAL_STATES`),
+工作台另有一份 `kbapp/web/assets/modules/graph.js:307`。
+
+**没有从 `states.py` 生成这些常量的步骤,也没有绑定两边的守卫测试**:
+`tests/test_plugin_service_client.cjs:361-366` 断言的是插件那份字面量自身,
+`python kb.py doctor architecture` 只查 Python import 图、不覆盖此处。因此
+**改 `states.py` 必须同步改插件两处**——漏改的失败模式是静默的:`startPolling`
+(`serviceClientCore.mjs:396-398`)循环无轮询上限,新状态不在
+`TERMINAL_STATUSES` 里就永远等不到终态,面板按 `POLL_INTERVAL_MS=1200`
+(`readerPanel.ts:108`)一直轮询、答案卡片不出现,`stageForRun` 又因新状态不在
+`RUN_ACTIVE_STATES` 里返回 `null`(`readerPanelCore.mjs:918`)、进度行定格,而
+现有测试仍全绿。
 
 代价是每次提问多一次 `GET /api/status` 预检(见 ADR 0031)与若干次轮询;轮询
 必须可取消,取消挂在面板 `dispose` 上——已用 `epoch` + `flight.setCancel(() =>
