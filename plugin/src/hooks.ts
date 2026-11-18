@@ -6,6 +6,7 @@ import {
   unregisterAll,
   unregisterWindow,
 } from "./registry";
+import { resetServiceClient } from "./service-client";
 
 /**
  * Lifecycle dispatcher. bootstrap.js forwards the Zotero bootstrap hooks
@@ -51,6 +52,8 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 function onShutdown(): void {
   // Disable/uninstall: reclaim every window plus the window-independent ones.
   unregisterAll();
+  // Drop the shared service client, and with it the cached session token.
+  resetServiceClient();
   addon.data.alive = false;
   delete Zotero[config.addonInstance];
 }

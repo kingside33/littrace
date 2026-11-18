@@ -165,6 +165,7 @@ jobs:
             tests/test_plugin_manifest.cjs
             tests/test_plugin_reader.cjs
             tests/test_plugin_registry.cjs
+            tests/test_plugin_service_client.cjs
             tests/test_references.cjs
             tests/test_reliability_graph.cjs
             tests/test_role_bubbles.cjs
@@ -213,6 +214,7 @@ jobs:
             tests/test_plugin_manifest.cjs \
             tests/test_plugin_reader.cjs \
             tests/test_plugin_registry.cjs \
+            tests/test_plugin_service_client.cjs \
             tests/test_references.cjs \
             tests/test_reliability_graph.cjs \
             tests/test_role_bubbles.cjs \
