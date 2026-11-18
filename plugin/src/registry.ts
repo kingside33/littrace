@@ -1,5 +1,6 @@
 import { createRegistry } from "./registryCore.mjs";
 import { registerReaderEvents } from "./readerPanel";
+import { createLineageColumn } from "./columns/lineage";
 
 /**
  * The single registration entry of the plugin.
@@ -7,14 +8,21 @@ import { registerReaderEvents } from "./readerPanel";
  * Every feature that registers something with Zotero (item columns, item
  * sections, reader panels, menus, notifiers, deep-link bridges) must do two
  * things here and nowhere else:
- *   1. perform the registration inside `registerAll`, and
- *   2. hand a disposer to `register(win, id, dispose)` so it can be reclaimed.
+ *   1. perform the registration inside `registerAll` (window-level) or
+ *      `registerWindowIndependent` (window-independent), and
+ *   2. hand a disposer to `register(win, id, dispose)` /
+ *      `registerGlobal(id, dispose)` so it can be reclaimed.
  *
  * Scoping: Zotero can have several main windows open at once, and startup
  * runs `registerAll` once per existing window. Registrations are therefore
  * keyed by (window, id): the same id may be registered once per window, and
  * a duplicate id is an error only within one window. Closing a window
  * disposes only that window's entries; shutdown disposes everything.
+ *
+ * A *process-wide* registry with no window dimension (item-tree columns,
+ * which Zotero stores once and every tree reads, and the reader events) goes
+ * into `registerWindowIndependent`: it runs once per startup, and only
+ * shutdown reclaims it.
  *
  * The bookkeeping itself lives in registryCore.mjs (plain ESM, no Zotero
  * globals) so tests/test_plugin_registry.cjs can exercise it directly.
@@ -59,8 +67,8 @@ export async function registerAll(win: Window): Promise<void> {
     return;
   }
   // Future features hook in here; each keeps its own
-  // `register(win, id, dispose)`. Reader events are NOT registered here: see
-  // registerWindowIndependent() below.
+  // `register(win, id, dispose)`. Reader events and the item-tree column are
+  // NOT registered here: see registerWindowIndependent() below.
 }
 
 /**
@@ -68,7 +76,9 @@ export async function registerAll(win: Window): Promise<void> {
  * once per window: `Zotero.Reader.registerEventListener` is global, so
  * registering it per main window would inject the selection buttons twice
  * and the second `unregisterEventListener` would remove the first handler's
- * twin. Reclaimed on shutdown only, per the (window, id) / global split in
+ * twin; likewise `Zotero.ItemTreeManager.registerColumn` keeps one
+ * process-wide column registry that every library tree reads. Reclaimed on
+ * shutdown only, per the (window, id) / global split in
  * docs/adr/0009-registry-keyed-by-window.md.
  */
 export function registerWindowIndependent(): void {
@@ -80,6 +90,14 @@ export function registerWindowIndependent(): void {
   // The disposer unregisters both handlers and closes any panel it opened,
   // so a disabled plugin leaves no listener or DOM behind in an open reader.
   registerGlobal("reader-panel", registerReaderEvents());
+  // 「谱系」item-tree column (A2). Registered only when Zotero accepted the
+  // option; a rejection is already logged and must not abort startup.
+  const lineage = createLineageColumn();
+  if (lineage.dataKey) {
+    registerGlobal("item-column:lineage", () => {
+      lineage.dispose();
+    });
+  }
 }
 
 /**

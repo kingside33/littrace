@@ -24,9 +24,10 @@ async function onStartup() {
   initLocale();
 
   // Window-independent registrations (notifiers, deep-link bridges, reader
-  // events) run exactly once. Registering them per main window would double
-  // every selection-popup button, because Zotero.Reader's listeners are
-  // global rather than per-window.
+  // events, the 「谱系」item-tree column) run exactly once. Registering them
+  // per main window would double every selection-popup button (Zotero.Reader's
+  // listeners are global) and the item-tree column (its registry is
+  // process-wide).
   registerWindowIndependent();
 
   // Run the window-level registration for windows that already exist, so a

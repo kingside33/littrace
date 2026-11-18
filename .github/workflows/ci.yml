@@ -161,6 +161,7 @@ jobs:
             tests/test_feedback.cjs
             tests/test_lineage.cjs
             tests/test_page_performance.cjs
+            tests/test_plugin_column.cjs
             tests/test_plugin_hooks.cjs
             tests/test_plugin_manifest.cjs
             tests/test_plugin_reader.cjs
@@ -210,6 +211,7 @@ jobs:
             tests/test_feedback.cjs \
             tests/test_lineage.cjs \
             tests/test_page_performance.cjs \
+            tests/test_plugin_column.cjs \
             tests/test_plugin_hooks.cjs \
             tests/test_plugin_manifest.cjs \
             tests/test_plugin_reader.cjs \
