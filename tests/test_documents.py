@@ -83,7 +83,10 @@ class Documents(unittest.TestCase):
         moved.write_bytes(first.read_bytes())
         again = register(self.store, paper, moved, 'KEY-A')
         self.assertEqual(again['id'], registered['id'])
-        self.assertEqual(again['path'], str(moved))
+        # register() 会把路径规范化(resolve),在 Windows 上会把临时目录的 8.3 短名
+        # (如 RUNNER~1)展开成长名,而 str(moved) 保留构造时的写法。两者指向同一文件,
+        # 所以比较前统一按文件系统真实路径规范化,而不是比较字符串拼写。
+        self.assertEqual(Path(again['path']).resolve(), moved.resolve())
         with self.store.db() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM documents WHERE paper_id=?', ('p',)).fetchone()[0], 1)
             self.assertEqual(db.execute('SELECT COUNT(*) FROM document_pages WHERE document_id=?', (registered['id'],)).fetchone()[0], count_before)

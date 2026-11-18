@@ -15,6 +15,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np
 import pymupdf
+import pytest
 from kbapp.core.chunking import chunk_paras, est_tokens
 from kbapp.library.chunk import page_text
 from kbapp.storage.store import Store
@@ -39,6 +40,20 @@ from kbapp.workflows.status import status as workbench_status
 
 os.environ['KB_NO_STARTUP_JOBS'] = '1'
 os.environ['KB_NO_REFERENCE_WORKER'] = '1'
+
+# 把 api_key 写进设置会走 DPAPI 密钥保护,该保护只在 Windows 提供(见 kbapp/core/secrets.py)。
+# 依赖它的用例在非 Windows 上按平台如实跳过,而不是红灯。
+DPAPI_REQUIRED = pytest.mark.skipif(
+    os.name != 'nt',
+    reason='DPAPI 密钥保护仅 Windows 提供,见 kbapp/core/secrets.py',
+)
+
+# 运行时身份判断在生产代码里本身就限定 Windows(见 kbapp/integrations/models.py 的
+# _runtime_owned),断言该判断为真的用例只能在其被实现的平台上运行。
+WINDOWS_ONLY = pytest.mark.skipif(
+    os.name != 'nt',
+    reason='运行时身份判断仅 Windows 实现,见 kbapp/integrations/models.py',
+)
 
 
 class Cases(unittest.TestCase):
@@ -911,6 +926,7 @@ class Cases(unittest.TestCase):
                 complete(self.store, 'prompt', 'test')
             http.assert_not_called()
 
+    @DPAPI_REQUIRED
     def test_key_not_exposed_and_budget_configuration_required(self):
         with self.assertRaises(ValueError):
             self.store.save_settings({'cloud_enabled': True})
@@ -921,6 +937,7 @@ class Cases(unittest.TestCase):
         self.store.save_settings({'api_key': None})
         self.assertEqual(self.store.settings()['api_key'], 'private-test-key')
 
+    @DPAPI_REQUIRED
     def test_budget_reservations_are_atomic(self):
         self.configure()
 
@@ -935,6 +952,7 @@ class Cases(unittest.TestCase):
             results = list(pool.map(reserve, range(2)))
         self.assertEqual(sum(results), 1)
 
+    @DPAPI_REQUIRED
     def test_explicit_unlimited_mode_records_tokens_without_claiming_zero_cost(self):
         self.store.save_settings(
             {
@@ -959,6 +977,7 @@ class Cases(unittest.TestCase):
         self.assertEqual(status['today_input_tokens'], 123)
         self.assertEqual(status['today_output_tokens'], 45)
 
+    @DPAPI_REQUIRED
     def test_reasoning_only_length_stop_is_recorded_without_retry(self):
         self.store.save_settings(
             {
@@ -984,6 +1003,7 @@ class Cases(unittest.TestCase):
             self.assertEqual(request['thinking']['type'], 'disabled')
         self.assertEqual(workbench_status(self.store)['today_output_tokens'], 3000)
 
+    @DPAPI_REQUIRED
     def test_independent_review_retries_only_definite_output_limit_and_caches_result(self):
         from kbapp.research.relations import review_relations
         from kbapp.integrations.cloud import CloudOutputLimitError
@@ -1052,6 +1072,7 @@ class Cases(unittest.TestCase):
         self.assertTrue(calls[0]['thinking'])
         self.assertFalse(calls[1]['thinking'])
 
+    @DPAPI_REQUIRED
     def test_review_resume_reuses_completed_relations_and_does_not_retry_timeout(self):
         from kbapp.research.relations import review_relations
         from kbapp.research.review import retry_deferred
@@ -1143,6 +1164,7 @@ class Cases(unittest.TestCase):
         self.assertEqual(data['groups'][0]['paths'][0]['kind'], 'citation')
         self.assertTrue(all((e['kind'] == 'cites' for e in data['groups'][0]['paths'][0]['edges'])))
 
+    @DPAPI_REQUIRED
     def test_failed_provider_does_not_retry_or_release_uncertain_cost(self):
         self.configure(0.001)
         with patch('kbapp.integrations.cloud.urlopen', side_effect=TimeoutError()) as http:
@@ -1453,6 +1475,7 @@ class Cases(unittest.TestCase):
         data = Search(self.store).search('RRT', direction='02', vectors=False)
         self.assertTrue(all((r['paper_id'] == self.paper['id'] for r in data['results'])))
 
+    @DPAPI_REQUIRED
     def test_qa_citations_must_be_exact_and_numbered(self):
         self.configure()
         docs = self.corpus()
@@ -1529,6 +1552,7 @@ class Cases(unittest.TestCase):
         self.assertEqual(self.store.state('active_version'), 'test')
         self.assertTrue((self.store.active_dir() / 'corpus.jsonl').is_file())
 
+    @DPAPI_REQUIRED
     def test_verification_respects_scope_and_reuses_completed_paper(self):
         from kbapp.research.relations import analyze_relations
 
@@ -1562,6 +1586,7 @@ class Cases(unittest.TestCase):
             self.assertEqual(model.call_count, 1)
         self.assertEqual(self.store.state('active_version'), 'test')
 
+    @DPAPI_REQUIRED
     def test_local_verification_prepares_only_next_batch_and_reuses_cache_after_restart(self):
         from kbapp.research.relations import analyze_relations
 
@@ -1813,6 +1838,7 @@ class Cases(unittest.TestCase):
         self.assertEqual(client.page_to_text.call_count, 1)
         doc.close()
 
+    @DPAPI_REQUIRED
     def test_uncertain_local_candidates_reach_cloud_and_cloud_support_is_required(self):
         from kbapp.research.relations import analyze_relations
 
@@ -1920,6 +1946,7 @@ class Cases(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_ai_relation(item, {s['id']: s for s in docs}, self.store.papers())
 
+    @DPAPI_REQUIRED
     def test_late_method_evidence_is_reviewed_before_earlier_abstract_similarity(self):
         from kbapp.research.relations import analyze_relations
 
@@ -2030,6 +2057,7 @@ class Cases(unittest.TestCase):
         self.store.relation(relation)
         self.assertEqual(self.store.relations()[0]['status'], 'rejected')
 
+    @WINDOWS_ONLY
     def test_runtime_identity_uses_process_time_and_port_owner_without_powershell(self):
         from kbapp.integrations.models import _runtime_owned
 
@@ -2069,6 +2097,7 @@ class Cases(unittest.TestCase):
             terminate.assert_not_called()
         self.assertEqual(self.store.state('local_text_runtime')['created_ticks'], 123)
 
+    @DPAPI_REQUIRED
     def test_unavailable_glm_does_not_fall_back_to_35b_ocr(self):
         from kbapp.research.relations import analyze_relations
 
@@ -2119,6 +2148,7 @@ class Cases(unittest.TestCase):
             {'model': 'glm-ocr:latest', 'page': 1, 'pdf_hash': 'hash'},
         )
 
+    @DPAPI_REQUIRED
     def test_verification_stop_before_call_preserves_index_and_makes_no_cloud_request(self):
         from kbapp.research.relations import analyze_relations
 
@@ -2139,6 +2169,7 @@ class Cases(unittest.TestCase):
         self.assertEqual(result['processed'], 0)
         self.assertEqual(self.store.state('active_version'), 'test')
 
+    @DPAPI_REQUIRED
     def test_web_verification_stops_async_job_without_losing_published_index(self):
         import threading
         from kbapp.workflows import verification as verification
@@ -2181,6 +2212,7 @@ class Cases(unittest.TestCase):
         self.assertEqual(state['completed'], 1)
         self.assertEqual(self.store.state('active_version'), 'test')
 
+    @DPAPI_REQUIRED
     def test_web_verification_continues_batches_and_counts_cache_once(self):
         from kbapp.workflows.verification import run_verification
 
