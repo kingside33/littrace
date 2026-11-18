@@ -52,6 +52,50 @@ function fakeManager() {
   };
 }
 
+/**
+ * A2 shipped a deterministic fake lineage provider. Since U1 the column reads
+ * the local service, so the fixture lives here as a test double instead of in
+ * the shipped module: the badge mapping, the text contract and the item-row
+ * guard stay observable without a service, exactly as the A2 cases required.
+ * No shipped module imports any of this.
+ */
+const FAKE_FIXTURES = Object.freeze([
+  Object.freeze({ confirmed: 5, pending: 0, gaps: 0 }),
+  Object.freeze({ confirmed: 2, pending: 2, gaps: 0 }),
+  Object.freeze({ confirmed: 1, pending: 0, gaps: 1 }),
+  Object.freeze({ confirmed: 0, pending: 0, gaps: 0 }),
+  Object.freeze({ confirmed: 3, pending: 1, gaps: 0 }),
+]);
+
+/** FNV-1a, stable across sessions: same key -> same fixture. */
+function stableHash(text) {
+  const source = typeof text === "string" ? text : "";
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+/** Fake lineage record for an item key; deterministic, empty for no key. */
+function fakeLineageFor(key) {
+  const source = typeof key === "string" ? key : "";
+  if (source.length === 0) {
+    return { confirmed: 0, pending: 0, gaps: 0 };
+  }
+  return { ...FAKE_FIXTURES[stableHash(source) % FAKE_FIXTURES.length] };
+}
+
+/** The A2 provider, rebuilt over the core's real guard. */
+function fakeLineageProvider(core) {
+  return core.createDataProvider((ref) =>
+    core.isItemRef(ref)
+      ? fakeLineageFor(core.itemKeyOf(ref))
+      : { confirmed: 0, pending: 0, gaps: 0 },
+  );
+}
+
 test("the three-state table is a fixed precedence: gap > pending > verified > empty", async () => {
   const core = await loadCore();
   const cases = [
@@ -124,6 +168,7 @@ test("counters are sanitised: garbage never becomes a badge", async () => {
 test("dataProvider is empty for every empty / error / offline input", async () => {
   const core = await loadCore();
   const offline = () => undefined;
+  const fake = fakeLineageProvider(core);
 
   const inputs = [
     null,
@@ -140,7 +185,7 @@ test("dataProvider is empty for every empty / error / offline input", async () =
   ];
   for (const value of inputs) {
     assert.equal(
-      core.fakeLineageDataProvider(value, "lineage"),
+      fake(value, "lineage"),
       "",
       `item ${JSON.stringify(value)} must yield an empty cell`,
     );
@@ -154,15 +199,16 @@ test("dataProvider is empty for every empty / error / offline input", async () =
   assert.equal(throwing(null, "lineage"), "");
   // And neither may the raw resolver itself be reachable: the provider
   // returns a string for every input, never undefined/null/object.
-  const provider = core.fakeLineageDataProvider;
+  const stringProvider = fakeLineageProvider(core);
   for (const value of [...inputs, item("ABCD1234")]) {
-    assert.equal(typeof provider(value, "lineage"), "string");
+    assert.equal(typeof stringProvider(value, "lineage"), "string");
   }
   assert.equal(core.cellText(offline()), "");
 });
 
 test("trashed collections and saved searches get no badge and no locate payload", async () => {
   const core = await loadCore();
+  const fake = fakeLineageProvider(core);
   // Zotero.Collection (collection.js:39) and Zotero.Search (search.js:44)
   // both carry a `.key`, so the trash view would otherwise show a fake badge
   // for them and dispatch a locate payload carrying a non-item key that U4
@@ -176,7 +222,7 @@ test("trashed collections and saved searches get no badge and no locate payload"
     assert.equal(core.isItemRef(ref), false, `${ref._objectType} is not an item`);
     assert.equal(core.itemKeyOf(ref), "", "a non-item has no item key");
     assert.equal(
-      core.fakeLineageDataProvider(ref, "lineage"),
+      fake(ref, "lineage"),
       "",
       "a non-item row must render a blank cell, not a fake badge",
     );
@@ -185,7 +231,7 @@ test("trashed collections and saved searches get no badge and no locate payload"
   // A real item is unaffected, including one whose row also carries extras.
   assert.equal(core.isItemRef(item("ABCD1234")), true);
   assert.equal(core.itemKeyOf(item("ABCD1234")), "ABCD1234");
-  assert.notEqual(core.fakeLineageDataProvider(item("ABCD1234"), "lineage"), "");
+  assert.notEqual(fake(item("ABCD1234"), "lineage"), "");
 
   // Without _objectType the item-only API decides: Collection and Search
   // define neither isRegularItem nor getField.
@@ -200,16 +246,17 @@ test("trashed collections and saved searches get no badge and no locate payload"
 
 test("the same item always produces the same text", async () => {
   const core = await loadCore();
+  const fake = fakeLineageProvider(core);
   const first = item("ITEMKEY1", 1);
   const second = item("ITEMKEY1", 1);
-  const firstText = core.fakeLineageDataProvider(first, "lineage");
+  const firstText = fake(first, "lineage");
   assert.notEqual(firstText, "", "a real item must produce fake lineage text");
-  assert.equal(core.fakeLineageDataProvider(second, "lineage"), firstText);
-  assert.equal(core.fakeLineageDataProvider(first, "lineage"), firstText);
-  assert.equal(core.fakeLineageDataProvider(first, "other-data-key"), firstText);
-  assert.equal(core.stableHash("ITEMKEY1"), core.stableHash("ITEMKEY1"));
-  assert.notEqual(core.stableHash("ITEMKEY1"), core.stableHash("ITEMKEY2"));
-  assert.equal(core.stableHash(undefined), core.stableHash(""));
+  assert.equal(fake(second, "lineage"), firstText);
+  assert.equal(fake(first, "lineage"), firstText);
+  assert.equal(fake(first, "other-data-key"), firstText);
+  assert.equal(stableHash("ITEMKEY1"), stableHash("ITEMKEY1"));
+  assert.notEqual(stableHash("ITEMKEY1"), stableHash("ITEMKEY2"));
+  assert.equal(stableHash(undefined), stableHash(""));
 });
 
 test("a library of fake items shows all four outcomes, badges included", async () => {
@@ -218,9 +265,9 @@ test("a library of fake items shows all four outcomes, badges included", async (
   const byState = new Map();
   for (let index = 0; index < 200; index += 1) {
     const key = `FAKE${index}`;
-    const counts = core.fakeLineageFor(key);
+    const counts = fakeLineageFor(key);
     const state = core.badgeState(counts);
-    const text = core.fakeLineageDataProvider(item(key), "lineage");
+    const text = fakeLineageProvider(core)(item(key), "lineage");
     seen.add(state);
     // Every text that is not blank must round-trip back to the same counts,
     // so renderCell can rebuild exactly the badge the dataProvider meant.
@@ -289,7 +336,7 @@ test("the count next to the badge is always the confirmed relation count", async
   // Every fixture must render a number that parses back to its confirmed
   // count, so the cell and the exported text cannot disagree.
   for (let index = 0; index < 200; index += 1) {
-    const counts_ = core.fakeLineageFor(`FAKE${index}`);
+    const counts_ = fakeLineageFor(`FAKE${index}`);
     if (core.badgeState(counts_) === "empty") {
       continue;
     }
@@ -377,12 +424,51 @@ test("the locate payload is only produced for a routable request", async () => {
   const core = await loadCore();
   assert.deepEqual(
     core.createLocatePayload({ itemKey: "ABCD1234", libraryID: 1, state: "pending" }),
-    { source: "lineage-column", itemKey: "ABCD1234", libraryID: 1, state: "pending" },
+    {
+      source: "lineage-column",
+      itemKey: "ABCD1234",
+      libraryID: 1,
+      state: "pending",
+      tab: "lineage",
+      paper: null,
+    },
+    "the payload names the tab to open; paper stays null when unknown",
   );
   assert.deepEqual(
     core.createLocatePayload({ itemKey: " ABCD1234 ", libraryID: "1", state: "gap" }),
-    { source: "lineage-column", itemKey: "ABCD1234", libraryID: null, state: "gap" },
+    {
+      source: "lineage-column",
+      itemKey: "ABCD1234",
+      libraryID: null,
+      state: "gap",
+      tab: "lineage",
+      paper: null,
+    },
   );
+  // U1 需求 5: the payload carries the identity the 谱系 tab passes through as
+  // `?paper=`, so the listener needs no second lookup.
+  assert.deepEqual(
+    core.createLocatePayload({
+      itemKey: "ABCD1234",
+      libraryID: 2,
+      state: "verified",
+      paper: " z:2:ABCD1234 ",
+    }),
+    {
+      source: "lineage-column",
+      itemKey: "ABCD1234",
+      libraryID: 2,
+      state: "verified",
+      tab: "lineage",
+      paper: "z:2:ABCD1234",
+    },
+  );
+  assert.equal(
+    core.createLocatePayload({ itemKey: "K", state: "verified", tab: "  " }),
+    null,
+    "a payload that names no tab cannot be routed",
+  );
+  assert.equal(core.createLocatePayload({ itemKey: "K", state: "verified", tab: 5 }), null);
   assert.equal(core.createLocatePayload(), null);
   assert.equal(core.createLocatePayload({ itemKey: "", state: "verified" }), null, "no paper, no locate");
   assert.equal(core.createLocatePayload({ itemKey: "K", state: "empty" }), null, "no badge, nothing to locate");
@@ -514,17 +600,55 @@ test("the column is wired through the plugin's single registration entry", () =>
     /renderCell:\s*renderLineageCell/,
     "the renderer must be the one this module defines",
   );
-  assert.match(lineage, /dataProvider:\s*fakeLineageDataProvider/, "A2 uses fake data on purpose");
+  // U1 replaced the A2 fake data. The column must read the shared real-data
+  // provider and must not keep a fake one anywhere in its wiring.
+  assert.match(
+    lineage,
+    /dataProvider:\s*\(item: unknown, dataKey: string\) =>\s*paperData\(\)\.lineageProvider\(item, dataKey\)/,
+    "「谱系」 reads real data through the shared cache",
+  );
+  assert.doesNotMatch(
+    lineage,
+    /fakeLineageDataProvider/,
+    "U1 binds real data; the fake provider must not be registered",
+  );
   assert.match(lineage, /export function createLineageColumn\(\)/, "the registry builds it");
+
+  const reading = fs.readFileSync(
+    path.join(PLUGIN_DIR, "src", "columns", "reading.ts"),
+    "utf8",
+  );
+  assert.match(
+    reading,
+    /createColumnRegistration\(\s*Zotero\.ItemTreeManager/,
+    "「精读」 registers through Zotero.ItemTreeManager too",
+  );
+  assert.match(
+    reading,
+    /readingColumnOption\(pluginID\)/,
+    "「精读」 uses its own dataKey/label option, not the lineage one",
+  );
+  assert.match(
+    reading,
+    /dataProvider:\s*\(item: unknown, dataKey: string\) =>\s*paperData\(\)\.readingProvider\(item, dataKey\)/,
+    "「精读」 reads the same shared cache",
+  );
+  assert.doesNotMatch(reading, /from "\.\.\/registry"/, "no registry cycle");
+  assert.match(reading, /export function createReadingColumn\(\)/, "the registry builds it");
 
   const registry = fs.readFileSync(path.join(PLUGIN_DIR, "src", "registry.ts"), "utf8");
   // The process-wide entry is registerWindowIndependent (shared with the
-  // reader events registered by A3); the column is added there, not in a
+  // reader events registered by A3); both columns are added there, not in a
   // second parallel "global" entry.
   assert.match(
     registry,
     /export function registerWindowIndependent\(\): void \{[\s\S]*?createLineageColumn\(\)[\s\S]*?registerGlobal\(\s*"item-column:lineage"/,
-    "registerWindowIndependent must register the column and hand its disposer to the registry",
+    "registerWindowIndependent must register the lineage column and hand its disposer to the registry",
+  );
+  assert.match(
+    registry,
+    /export function registerWindowIndependent\(\): void \{[\s\S]*?createReadingColumn\(\)[\s\S]*?registerGlobal\(\s*"item-column:reading"/,
+    "registerWindowIndependent must register the reading column too",
   );
   assert.doesNotMatch(
     registry,
@@ -540,11 +664,502 @@ test("the column is wired through the plugin's single registration entry", () =>
     /unregisterColumn|unregisterAll\(/,
     "closing one window must not unregister a process-wide column",
   );
-  assert.match(
-    hooks.slice(hooks.indexOf("function onShutdown(")),
-    /unregisterAll\(\)/,
-    "disable/uninstall still reclaims the column",
+  // Shutdown must release the cached library data along with the columns, or
+  // a disabled plugin would keep paper records in memory.
+  const shutdown = hooks.slice(hooks.indexOf("function onShutdown("));
+  assert.match(shutdown, /unregisterAll\(\)/, "disable/uninstall still reclaims the columns");
+  assert.match(shutdown, /resetPaperData\(\)/, "shutdown drops the per-paper cache");
+  assert.ok(
+    shutdown.indexOf("unregisterAll()") < shutdown.indexOf("resetPaperData()"),
+    "the columns are unregistered before their cache is dropped",
   );
+});
+
+// ---------------------------------------------------------------------------
+// U1: the two columns read real data from the local service.
+//
+// Everything below runs the real module (plugin/src/columns/columnDataCore.mjs)
+// against response bodies shaped exactly like `GET /api/v2/paper`
+// (kbapp/web/library_api.py `paper_view`, checked on main): a `paper` object,
+// a `relations` array of raw relation payloads, and `understanding` — the
+// latest PaperUnderstanding artifact (kbapp/research/reading.py:148) or null.
+// ---------------------------------------------------------------------------
+
+const DATA_CORE_URL = pathToFileURL(
+  path.join(PLUGIN_DIR, "src", "columns", "columnDataCore.mjs"),
+).href;
+
+async function loadDataCore() {
+  return import(DATA_CORE_URL);
+}
+
+/** One relation as the service stores it (kbapp/storage/store.py `relation`). */
+function relation(status, extra = {}) {
+  return {
+    id: `rel-${status}`,
+    src: "z:1:AAAA1111",
+    dst: "z:1:BBBB2222",
+    kind: "inherits",
+    status,
+    level: "fulltext",
+    evidence: [{ quote: "...", origin: "pdf" }],
+    ...extra,
+  };
+}
+
+/** A full `GET /api/v2/paper` body; override any part per case. */
+function paperResponse(overrides = {}) {
+  return {
+    paper: {
+      id: "z:1:AAAA1111",
+      kind: "library",
+      title: "Informed RRT*",
+      year: 2020,
+      zotero_key: "AAAA1111",
+      library_id: 1,
+    },
+    relations: [],
+    approvals: [],
+    understanding: null,
+    note_sync: { status: "not_generated" },
+    references: { items: [], status: "complete" },
+    ...overrides,
+  };
+}
+
+/** Let queued microtasks run so an in-flight fetch can settle. */
+function flush() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+/** A fetchPaper stand-in that records calls and resolves/rejects on demand. */
+function recordingFetcher(impl) {
+  const calls = [];
+  const fetchPaper = (paper, context) => {
+    calls.push({ paper, context });
+    return impl(paper, context, calls.length);
+  };
+  return { calls, fetchPaper };
+}
+
+test("relation counts follow the service's own notion of established", async () => {
+  const data = await loadDataCore();
+  // kbapp/research/viewmodels.py:35 — established is `status == 'confirmed'
+  // and not evidence_stale`. A confirmed-but-stale edge is the gap case
+  // (viewmodels.py:67 「证据已过期，待复核」), not a confirmed one.
+  const counts = data.lineageCountsFromRelations([
+    relation("confirmed"),
+    relation("confirmed"),
+    relation("confirmed", { evidence_stale: true }),
+    relation("candidate"),
+    relation("rejected"),
+  ]);
+  assert.deepEqual(counts, { confirmed: 2, pending: 1, gaps: 1 });
+
+  // `rejected` is the only status the service never shows
+  // (`status!='rejected'` throughout graph.py), so it must not count anywhere.
+  assert.deepEqual(
+    data.lineageCountsFromRelations([relation("rejected"), relation("rejected", { evidence_stale: true })]),
+    { confirmed: 0, pending: 0, gaps: 0 },
+  );
+
+  // An unknown status is pending, not dropped: the service mentioned it.
+  assert.deepEqual(data.lineageCountsFromRelations([relation("under_review")]), {
+    confirmed: 0,
+    pending: 1,
+    gaps: 0,
+  });
+
+  // Defensive: a non-array, nulls and primitives never throw.
+  for (const value of [null, undefined, {}, "", 5, [null, 3, "x", []]]) {
+    assert.deepEqual(data.lineageCountsFromRelations(value), {
+      confirmed: 0,
+      pending: 0,
+      gaps: 0,
+    });
+  }
+});
+
+test("a real response body maps to the two column texts", async () => {
+  const data = await loadDataCore();
+  const core = await loadCore();
+  const body = paperResponse({
+    relations: [
+      relation("confirmed"),
+      relation("confirmed"),
+      relation("candidate"),
+      relation("confirmed", { evidence_stale: true }),
+    ],
+    understanding: {
+      paper_id: "z:1:AAAA1111",
+      coverage: { total_pages: 12, read_pages: [1, 2, 3, 4, 5, 6, 7], missing_pages: [8, 9, 10, 11, 12], complete: false },
+    },
+  });
+
+  const providers = data.createPaperDataProviders({
+    fetchPaper: async () => body,
+  });
+  const row = item("AAAA1111", 1);
+
+  // First read: nothing cached yet, so both cells are blank and one request
+  // is started. A synchronous dataProvider cannot wait for HTTP.
+  assert.equal(providers.lineageProvider(row, "lineage"), "");
+  assert.equal(providers.readingProvider(row, "reading"), "");
+  await flush();
+
+  // After the answer lands, the same synchronous providers return real text.
+  assert.equal(providers.lineageProvider(row, "lineage"), core.cellText({ confirmed: 2, pending: 1, gaps: 1 }));
+  assert.equal(providers.lineageProvider(row, "lineage"), "2 已确认 · 1 待核 · 1 缺口");
+  assert.equal(providers.readingProvider(row, "reading"), "部分精读 · 7/12 页");
+
+  // The text must parse back to the badge the renderer draws, so the cell and
+  // the sort/export key cannot disagree.
+  assert.deepEqual(core.parseCellText(providers.lineageProvider(row, "lineage")), {
+    confirmed: 2,
+    pending: 1,
+    gaps: 1,
+  });
+  assert.deepEqual(data.parseReadingCellText(providers.readingProvider(row, "reading")), {
+    state: "partial",
+    readPages: 7,
+    totalPages: 12,
+  });
+  assert.equal(core.badgeForText(providers.lineageProvider(row, "lineage")).state, "gap");
+});
+
+test("reading coverage maps to its three states without inventing one", async () => {
+  const data = await loadDataCore();
+  const cases = [
+    // A finished reading: every page read, complete.
+    [
+      { coverage: { total_pages: 12, read_pages: new Array(12).fill(0).map((_, i) => i + 1), missing_pages: [], complete: true } },
+      { state: "complete", readPages: 12, totalPages: 12 },
+      "已精读 · 12/12 页",
+    ],
+    // Partial: some pages read, not complete.
+    [
+      { coverage: { total_pages: 12, read_pages: [1, 2, 3], missing_pages: [4, 5], complete: false } },
+      { state: "partial", readPages: 3, totalPages: 12 },
+      "部分精读 · 3/12 页",
+    ],
+    // A real answer with no reading at all (reading.py:61 writes this shape
+    // when the PDF is unavailable).
+    [
+      { coverage: { total_pages: 0, read_pages: [], missing_pages: [], complete: false } },
+      { state: "none", readPages: 0, totalPages: 0 },
+      "未精读",
+    ],
+    // `complete: true` with no pages is not a completed reading; it is still
+    // a real answer, so it stays visible rather than vanishing.
+    [
+      { coverage: { total_pages: 0, read_pages: [], complete: true } },
+      { state: "partial", readPages: 0, totalPages: 0 },
+      "部分精读 · 0/0 页",
+    ],
+    // The service rewrites a stale artifact with `coverage.complete = False`
+    // and `verification_status: 'stale'` (kbapp/web/library_api.py), so this
+    // is the body a stale reading actually arrives as — verified against the
+    // real endpoint with a stored artifact. It must render 部分精读, never
+    // 已精读.
+    [
+      {
+        verification_status: "stale",
+        coverage: { total_pages: 12, read_pages: [1, 2, 3, 4, 5, 6, 7], missing_pages: [8, 9, 10, 11, 12], complete: false },
+      },
+      { state: "partial", readPages: 7, totalPages: 12 },
+      "部分精读 · 7/12 页",
+    ],
+    // `understanding: null` is the service saying "no artifact yet".
+    [null, { state: "none", readPages: 0, totalPages: 0 }, "未精读"],
+  ];
+  for (const [understanding, expected, text] of cases) {
+    const reading = data.readingFromUnderstanding(understanding);
+    assert.deepEqual(reading, expected, `coverage ${JSON.stringify(understanding)}`);
+    assert.equal(data.readingCellText(reading), text);
+    assert.deepEqual(data.parseReadingCellText(text), expected, `${text} must round-trip`);
+  }
+
+  // No usable coverage is "no answer", never a fabricated state: the column
+  // renders blank. This is the branch to revisit if the endpoint ever drops
+  // the coverage field (issue #27 需求 2).
+  for (const unknown of [undefined, {}, { coverage: null }, { coverage: [] }, "complete", 3]) {
+    assert.equal(data.readingFromUnderstanding(unknown), null, `no answer for ${JSON.stringify(unknown)}`);
+    assert.equal(data.readingCellText(data.readingFromUnderstanding(unknown)), "");
+  }
+  assert.equal(data.readingCellText({ state: "bogus" }), "");
+  assert.equal(data.readingCellText(null), "");
+});
+
+test("the reading badge carries the full sentence in its title", async () => {
+  const data = await loadDataCore();
+  const complete = data.readingBadgeForText("已精读 · 12/12 页");
+  assert.equal(complete.state, "complete");
+  assert.equal(complete.symbol, "●");
+  assert.equal(complete.title, "已精读 · 已读 12/12 页");
+
+  const partial = data.readingBadgeForText("部分精读 · 7/12 页");
+  assert.equal(partial.symbol, "◐");
+  assert.equal(partial.className, "littrace-reading-partial");
+
+  const none = data.readingBadgeForText("未精读");
+  assert.equal(none.state, "none");
+  assert.equal(none.title, "尚无精读产物", "no fake page progress for an unread paper");
+
+  // Three states must be visually distinguishable, exactly as the lineage
+  // badges are (ADR 0012).
+  const classes = [complete.className, partial.className, none.className];
+  assert.equal(new Set(classes).size, 3);
+  const symbols = [complete.symbol, partial.symbol, none.symbol];
+  assert.equal(new Set(symbols).size, 3);
+
+  for (const text of ["", null, undefined, 5, "已精读", "已精读 · 12 页", "部分精读 · x/y 页", "未精读 · 0/0 页"]) {
+    assert.equal(data.readingBadgeForText(text), null, `must not badge ${JSON.stringify(text)}`);
+  }
+});
+
+test("the cache key is the identity the service resolves", async () => {
+  const data = await loadDataCore();
+  assert.equal(data.paperKeyOf(1, "AAAA1111"), "z:1:AAAA1111");
+  assert.equal(data.paperKeyOf(2, "AAAA1111"), "z:2:AAAA1111", "the same key in another library is another paper");
+  assert.equal(data.paperKeyOf(1, "  AAAA1111  "), "z:1:AAAA1111", "keys are trimmed");
+  // The service defaults a missing library_id to 1 (`int(p.get('library_id',
+  // 1))`), so an absent/garbage libraryID must mean the user library.
+  for (const libraryID of [undefined, null, 0, -1, NaN, Infinity, "1", {}]) {
+    assert.equal(data.paperKeyOf(libraryID, "AAAA1111"), "z:1:AAAA1111", `libraryID ${String(libraryID)}`);
+  }
+  assert.equal(data.paperKeyOf(1.7, "K"), "z:1:K", "fractional library ids are truncated");
+  for (const itemKey of ["", "   ", null, undefined, 5, {}]) {
+    assert.equal(data.paperKeyOf(1, itemKey), "", "no item key, no paper");
+  }
+  assert.equal(data.paperKeyOf(1, "AAAA1111"), "z:1:AAAA1111", "stable across calls");
+
+  // The request path escapes the identity: a key is opaque to this module.
+  assert.equal(data.paperPath(1, "AAAA1111"), "/api/v2/paper?paper=z%3A1%3AAAAA1111");
+  assert.equal(data.paperPath(0, ""), "", "no key, no request");
+});
+
+test("one request per paper: hits are served from cache, misses are deduped", async () => {
+  const data = await loadDataCore();
+  const fetcher = recordingFetcher(async () => {
+    await flush();
+    return paperResponse({ relations: [relation("confirmed")] });
+  });
+  const providers = data.createPaperDataProviders({ fetchPaper: fetcher.fetchPaper });
+  const row = item("AAAA1111", 1);
+
+  // Both columns ask on the same tick, then the list repaints and asks again:
+  // the cache is empty until the answer lands, so every one of these calls is
+  // a miss — but exactly one request may be in flight.
+  assert.equal(providers.lineageProvider(row, "lineage"), "");
+  assert.equal(providers.readingProvider(row, "reading"), "");
+  assert.equal(providers.lineageProvider(row, "lineage"), "");
+  assert.equal(fetcher.calls.length, 1, "in-flight requests are deduped");
+  assert.equal(fetcher.calls[0].paper, "z:1:AAAA1111");
+  assert.deepEqual(fetcher.calls[0].context, { libraryID: 1, itemKey: "AAAA1111" });
+  await flush();
+
+  // Served from cache afterwards; no second request.
+  assert.equal(providers.lineageProvider(row, "lineage"), "1 已确认 · 0 待核 · 0 缺口");
+  assert.equal(providers.readingProvider(row, "reading"), "未精读");
+  assert.equal(fetcher.calls.length, 1, "a cache hit must not call the service");
+
+  // A different paper (same key, other library) is a different cache entry.
+  providers.lineageProvider(item("AAAA1111", 2), "lineage");
+  assert.equal(fetcher.calls.length, 2);
+  assert.equal(fetcher.calls[1].paper, "z:2:AAAA1111");
+
+  // Non-item rows never reach the service: collections and searches have keys
+  // too (collection.js:39, search.js:44) but no paper behind them.
+  for (const ref of [
+    { _objectType: "collection", key: "AAAA1111" },
+    { _objectType: "search", key: "AAAA1111" },
+    { _objectType: "header" },
+    { _objectType: "item", key: "" },
+    null,
+  ]) {
+    assert.equal(providers.lineageProvider(ref, "lineage"), "");
+    assert.equal(providers.readingProvider(ref, "reading"), "");
+  }
+  assert.equal(fetcher.calls.length, 2, "non-item rows must not hit the service");
+});
+
+test("an update hook fires once per successful answer, never on failure", async () => {
+  const data = await loadDataCore();
+  const updated = [];
+  let mode = "ok";
+  const providers = data.createPaperDataProviders({
+    fetchPaper: async () => {
+      if (mode === "fail") {
+        throw new Error("service offline");
+      }
+      return paperResponse();
+    },
+    onUpdate: (key) => updated.push(key),
+  });
+
+  providers.lineageProvider(item("AAAA1111"), "lineage");
+  await flush();
+  assert.deepEqual(updated, ["z:1:AAAA1111"], "a landed answer repaints the tree once");
+
+  mode = "fail";
+  providers.lineageProvider(item("BBBB2222"), "lineage");
+  await flush();
+  assert.deepEqual(updated, ["z:1:AAAA1111"], "a failure changes nothing on screen");
+
+  // A throwing repaint hook must not turn a good response into a failure.
+  const throwing = data.createPaperDataProviders({
+    fetchPaper: async () => paperResponse(),
+    onUpdate: () => {
+      throw new Error("window torn down");
+    },
+  });
+  throwing.lineageProvider(item("CCCC3333"), "lineage");
+  await flush();
+  assert.equal(throwing.readingProvider(item("CCCC3333"), "reading"), "未精读");
+});
+
+test("every failure leaves both cells blank instead of throwing", async () => {
+  const data = await loadDataCore();
+  const failures = [
+    async () => {
+      throw new Error("service offline");
+    },
+    () => {
+      throw new Error("thrown synchronously");
+    },
+    async () => null,
+    async () => "not an object",
+    async () => ({}),
+    async () => ({ relations: "not an array" }),
+  ];
+  for (const fetchPaper of failures) {
+    const providers = data.createPaperDataProviders({ fetchPaper });
+    const row = item("AAAA1111");
+    // Before the rejection settles and after it: still empty, still no throw.
+    assert.equal(providers.lineageProvider(row, "lineage"), "");
+    assert.equal(providers.readingProvider(row, "reading"), "");
+    await flush();
+    assert.equal(providers.lineageProvider(row, "lineage"), "");
+    assert.equal(providers.readingProvider(row, "reading"), "");
+    // The list keeps asking on every repaint; none of that may throw either.
+    for (let index = 0; index < 3; index += 1) {
+      assert.equal(typeof providers.lineageProvider(row, "lineage"), "string");
+      assert.equal(typeof providers.readingProvider(row, "reading"), "string");
+    }
+  }
+});
+
+test("a failed paper is retried after the short failure TTL, not immediately", async () => {
+  const data = await loadDataCore();
+  let now = 1000;
+  let attempts = 0;
+  const cache = data.createPaperCache({ now: () => now, ttlMs: 60000, failureTtlMs: 5000 });
+  const providers = data.createPaperDataProviders({
+    cache,
+    fetchPaper: async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error("service offline");
+      }
+      return paperResponse({ relations: [relation("confirmed")] });
+    },
+  });
+  const row = item("AAAA1111");
+
+  providers.lineageProvider(row, "lineage");
+  await flush();
+  assert.equal(attempts, 1);
+  assert.equal(providers.lineageProvider(row, "lineage"), "");
+
+  // Within the failure TTL the list may repaint as often as it likes; a down
+  // service must not get one request per row per repaint.
+  now += 1000;
+  providers.lineageProvider(row, "lineage");
+  await flush();
+  assert.equal(attempts, 1, "a recent failure is not retried immediately");
+
+  // Once the short TTL expires the column recovers on its own.
+  now += 5000;
+  providers.lineageProvider(row, "lineage");
+  await flush();
+  assert.equal(attempts, 2, "the service is retried after the failure TTL");
+  assert.equal(providers.lineageProvider(row, "lineage"), "1 已确认 · 0 待核 · 0 缺口");
+});
+
+test("the cache expires, bounds itself and can be cleared", async () => {
+  const data = await loadDataCore();
+  let now = 0;
+  const cache = data.createPaperCache({ now: () => now, ttlMs: 100, maxEntries: 2 });
+  assert.equal(cache.read("k"), undefined, "a miss is undefined");
+
+  cache.store("k", { value: 1 });
+  assert.deepEqual(cache.read("k"), { ok: true, data: { value: 1 } });
+  now = 99;
+  assert.notEqual(cache.read("k"), undefined, "still fresh before the TTL");
+  now = 100;
+  assert.equal(cache.read("k"), undefined, "expires at the TTL boundary");
+
+  cache.storeFailure("f");
+  assert.deepEqual(cache.read("f"), { ok: false, data: null }, "a failure is cached as 'no answer'");
+  now += data.PAPER_CACHE_DEFAULTS.failureTtlMs;
+  assert.equal(cache.read("f"), undefined, "the failure entry expires too");
+
+  // Oldest-insertion eviction keeps memory bounded on a huge library.
+  now = 0;
+  cache.store("a", { n: 1 });
+  cache.store("b", { n: 2 });
+  cache.store("c", { n: 3 });
+  assert.equal(cache.size, 2, "the oldest entry is evicted");
+  assert.equal(cache.read("a"), undefined);
+  assert.notEqual(cache.read("c"), undefined, "the newest entry survives");
+
+  cache.clear();
+  assert.equal(cache.size, 0);
+  for (const key of ["", null, undefined, 5]) {
+    assert.equal(cache.read(key), undefined);
+    cache.store(key, {});
+    cache.storeFailure(key);
+  }
+  assert.equal(cache.size, 0, "garbage keys are ignored, not stored");
+});
+
+test("both column options register with documented keys only", async () => {
+  const core = await loadCore();
+  const lineage = core.lineageColumnOption("littrace@example.invalid");
+  const reading = core.readingColumnOption("littrace@example.invalid");
+  // pluginAPIBase._validateObject throws "Unknown option" for any key outside
+  // itemTreeManager's optionTypeDefinition. Both columns must stay inside it.
+  const keys = [
+    "dataKey",
+    "enabledTreeIDs",
+    "flex",
+    "label",
+    "minWidth",
+    "pluginID",
+    "showInColumnPicker",
+    "zoteroPersist",
+  ];
+  assert.deepEqual(Object.keys(lineage).sort(), keys);
+  assert.deepEqual(Object.keys(reading).sort(), keys);
+
+  assert.equal(reading.dataKey, "reading");
+  assert.equal(reading.label, "精读");
+  assert.notEqual(reading.dataKey, lineage.dataKey, "two columns need two dataKeys");
+  assert.equal("defaultIn" in reading, false, "「精读」 is default-off too");
+  assert.equal(reading.showInColumnPicker, true);
+  assert.deepEqual(reading.enabledTreeIDs, ["main"]);
+  assert.deepEqual(reading.zoteroPersist, ["width", "hidden", "sortDirection"]);
+
+  // The reading column registers its own option, not the lineage one.
+  const manager = fakeManager();
+  const registration = core.createColumnRegistration(
+    manager,
+    "littrace@example.invalid",
+    { dataProvider: () => "" },
+    reading,
+  );
+  assert.equal(manager.calls.register[0].dataKey, "reading");
+  assert.equal(registration.dispose(), true);
 });
 
 /** Minimal stand-in for a Document/Window: only what the core touches. */class fakeEventTarget {

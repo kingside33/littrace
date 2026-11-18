@@ -1,11 +1,14 @@
 /**
- * Pure logic for the 「谱系」 item-tree column (A2 原型).
+ * Pure logic for the two item-tree columns: the 「谱系」 badge (A2, real data
+ * since U1) and the 「精读」 badge (U1).
  *
  * Deliberately plain ESM with no Zotero, DOM or TypeScript globals, so
  * tests/test_plugin_column.cjs can exercise the real badge mapping, the
  * dataProvider text contract and the click-event contract with
- * `node --test` and no npm install. src/columns/lineage.ts wraps this with
- * the Zotero-facing registration and with the DOM renderer.
+ * `node --test` and no npm install. src/columns/lineage.ts and
+ * src/columns/reading.ts wrap this with the Zotero-facing registration and
+ * the DOM renderers; the real-data mapping and cache live in
+ * src/columns/columnDataCore.mjs.
  *
  * Facts this module is built on (Zotero 10 main, read for A2):
  *   - `Zotero.ItemTreeManager.registerColumn` (pluginAPI/itemTreeManager.js)
@@ -35,6 +38,12 @@ export const LINEAGE_LOCATE_EVENT = "littrace:lineage-locate";
 /** Raw dataKey; Zotero namespaces it with the plugin ID on registration. */
 export const LINEAGE_COLUMN_DATA_KEY = "lineage";
 
+/** Raw dataKey of the 「精读」 column registered beside it (U1). */
+export const READING_COLUMN_DATA_KEY = "reading";
+
+/** The tab a locate request opens; U4 owns the tab itself. */
+export const LINEAGE_TAB_ID = "lineage";
+
 /**
  * Badge descriptors for the three states. `symbol` is the visual glyph,
  * `label` the short Chinese state name used in titles.
@@ -62,19 +71,6 @@ const STATE_BADGES = Object.freeze({
     color: "rgba(180, 83, 9, 0.85)",
   }),
 });
-
-/**
- * Deterministic fake fixtures (A2 uses fake data on purpose). The hash below
- * picks one by item key, so the same item always shows the same badge while
- * a library shows all four outcomes (verified / pending / gap / empty).
- */
-const FAKE_FIXTURES = Object.freeze([
-  Object.freeze({ confirmed: 5, pending: 0, gaps: 0 }),
-  Object.freeze({ confirmed: 2, pending: 2, gaps: 0 }),
-  Object.freeze({ confirmed: 1, pending: 0, gaps: 1 }),
-  Object.freeze({ confirmed: 0, pending: 0, gaps: 0 }),
-  Object.freeze({ confirmed: 3, pending: 1, gaps: 0 }),
-]);
 
 /** Copy out a plain counts object; every counter is a non-negative integer. */
 function zeroCounts() {
@@ -288,9 +284,9 @@ export function itemKeyOf(ref) {
  * and `ZoteroPane.itemsView` proxies to the *active* view
  * (zoteroPane.js:191-193). That is exact for the tree on screen; with
  * several library tabs open it can name the same row index of the active
- * tab instead. This is prototype-grade targeting for the reserved click
- * hook — before U1 binds real data the payload should be derived from the
- * row itself.
+ * tab instead. The click payload is therefore built from the row ref found
+ * this way, and a mis-targeted row can at worst locate the same row index in
+ * another tab — it can never write anything.
  *
  * Returns null for anything that is not a real item: collection / saved-search
  * rows (the trash view renders them and they also have `.key`) and
@@ -336,38 +332,6 @@ function findRowRef(context, index, doc) {
   }
 }
 
-/** FNV-1a, stable across sessions: same key -> same fixture. */
-export function stableHash(text) {
-  const source = typeof text === "string" ? text : "";
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < source.length; index += 1) {
-    hash ^= source.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return hash >>> 0;
-}
-
-/** Fake lineage record for an item key; deterministic, empty for no key. */
-export function fakeLineageFor(key) {
-  const source = typeof key === "string" ? key : "";
-  if (source.length === 0) {
-    return zeroCounts();
-  }
-  return { ...FAKE_FIXTURES[stableHash(source) % FAKE_FIXTURES.length] };
-}
-
-/**
- * The dataProvider actually registered on the column in A2.
- *
- * Non-item rows (trashed collections / saved searches, which also have keys
- * but no lineage) resolve to the empty record, so they render a blank cell
- * rather than a fake badge — the same guard itemKeyOf applies to the click
- * payload.
- */
-export const fakeLineageDataProvider = createDataProvider((item) =>
-  isItemRef(item) ? fakeLineageFor(itemKeyOf(item)) : zeroCounts(),
-);
-
 /**
  * Option object handed to `Zotero.ItemTreeManager.registerColumn`, minus the
  * two functions the renderer supplies.
@@ -377,18 +341,34 @@ export const fakeLineageDataProvider = createDataProvider((item) =>
  * "默认关闭" requirement. `zoteroPersist` keeps the user's width / hidden /
  * sort choices across restarts (virtualized-table.jsx `_getPersistedSettings`
  * always persists ordinal/hidden/sortDirection and honours this list too).
+ *
+ * Both columns share the same shape because they share the same behaviour;
+ * only dataKey, label and width differ.
  */
-export function lineageColumnOption(pluginID) {
+export function columnOption(pluginID, dataKey, label, extra = {}) {
   return {
-    dataKey: LINEAGE_COLUMN_DATA_KEY,
-    label: "谱系",
+    dataKey,
+    label,
     pluginID: typeof pluginID === "string" ? pluginID : "",
     enabledTreeIDs: ["main"],
     showInColumnPicker: true,
     flex: 1,
     minWidth: 48,
     zoteroPersist: ["width", "hidden", "sortDirection"],
+    ...extra,
   };
+}
+
+export function lineageColumnOption(pluginID) {
+  return columnOption(pluginID, LINEAGE_COLUMN_DATA_KEY, "谱系");
+}
+
+export function readingColumnOption(pluginID) {
+  // Wider than the lineage badge: the cell carries "部分精读 · 7/12 页".
+  return columnOption(pluginID, READING_COLUMN_DATA_KEY, "精读", {
+    flex: 1.2,
+    minWidth: 72,
+  });
 }
 
 /**
@@ -401,11 +381,12 @@ export function lineageColumnOption(pluginID) {
  * no-op disposer — Zotero logs the validation error itself, and the caller
  * decides whether to surface it. Never throws.
  */
-export function createColumnRegistration(manager, pluginID, hooks = {}) {
-  const option = Object.assign(lineageColumnOption(pluginID), hooks);
+export function createColumnRegistration(manager, pluginID, hooks = {}, option = null) {
+  const base = option && typeof option === "object" ? option : lineageColumnOption(pluginID);
+  const finalOption = Object.assign({}, base, hooks);
   let dataKey = null;
   try {
-    const registered = manager.registerColumn(option);
+    const registered = manager.registerColumn(finalOption);
     dataKey = typeof registered === "string" && registered.length > 0 ? registered : null;
   } catch {
     dataKey = null;
@@ -413,7 +394,7 @@ export function createColumnRegistration(manager, pluginID, hooks = {}) {
   let disposed = false;
   return {
     dataKey,
-    option,
+    option: finalOption,
     dispose() {
       if (disposed || !dataKey) {
         disposed = true;
@@ -430,14 +411,25 @@ export function createColumnRegistration(manager, pluginID, hooks = {}) {
 }
 
 /**
- * Click payload contract for the future 谱系 tab (U4). The column only
- * dispatches this event; it does not know how a tab opens.
+ * Click payload contract for the 谱系 tab (U4 owns the tab).
+ *
+ * The column only dispatches this event; it does not know how a tab opens.
+ * `tab` and `paper` carry the whole locate request, so a listener needs no
+ * second lookup: `tab` is the tab id to open and `paper` is the identity the
+ * service accepts as `GET /api/v2/paper?paper=<paper>`
+ * (`z:<libraryID>:<zotero key>`).
  *
  * Returns null when the payload could not be routed anywhere meaningful
- * (no item key or no badge state), in which case the caller dispatches
- * nothing — a locate request without a paper cannot be honoured.
+ * (no item key, no tab id, or no badge state), in which case the caller
+ * dispatches nothing — a locate request without a paper cannot be honoured.
  */
-export function createLocatePayload({ itemKey, libraryID, state } = {}) {
+export function createLocatePayload({
+  itemKey,
+  libraryID,
+  state,
+  paper,
+  tab = LINEAGE_TAB_ID,
+} = {}) {
   const key = typeof itemKey === "string" ? itemKey.trim() : "";
   if (key.length === 0) {
     return null;
@@ -445,11 +437,26 @@ export function createLocatePayload({ itemKey, libraryID, state } = {}) {
   if (!LINEAGE_STATES.includes(state)) {
     return null;
   }
+  const tabID = typeof tab === "string" ? tab.trim() : "";
+  if (tabID.length === 0) {
+    return null;
+  }
   const library =
     typeof libraryID === "number" && Number.isFinite(libraryID)
       ? Math.trunc(libraryID)
       : null;
-  return { source: "lineage-column", itemKey: key, libraryID: library, state };
+  const identity = typeof paper === "string" ? paper.trim() : "";
+  return {
+    source: "lineage-column",
+    itemKey: key,
+    libraryID: library,
+    state,
+    // U4 reads `tab` to pick which feature tab to open and `paper` to pass
+    // through as `?paper=` for selection. Absent when the caller could not
+    // name a paper (a stale payload shape must still be dispatchable).
+    tab: tabID,
+    paper: identity.length > 0 ? identity : null,
+  };
 }
 
 /**

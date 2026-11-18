@@ -7,6 +7,7 @@ import {
   unregisterWindow,
 } from "./registry";
 import { resetServiceClient } from "./service-client";
+import { resetPaperData } from "./columns/paperData";
 
 /**
  * Lifecycle dispatcher. bootstrap.js forwards the Zotero bootstrap hooks
@@ -53,6 +54,9 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 function onShutdown(): void {
   // Disable/uninstall: reclaim every window plus the window-independent ones.
   unregisterAll();
+  // Drop the per-paper column cache (and its pending repaint) so a disabled
+  // plugin holds no library data in memory.
+  resetPaperData();
   // Drop the shared service client, and with it the cached session token.
   resetServiceClient();
   addon.data.alive = false;
