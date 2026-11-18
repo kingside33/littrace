@@ -339,13 +339,30 @@ function settle(
   action: SelectionAction | null,
   question: string,
 ): void {
+  // Clear the in-flight marker BEFORE building the outcome. `answer()` can
+  // throw on a malformed conclusion (normalizeConclusion rejects empty text),
+  // and if it did so with the marker still set, every later question and
+  // retry would hit the canAsk() gate and be refused forever.
+  mount.timer = null;
   // STATIC DATA PATH: no service call. `demoOutcome` is the only source of
   // answers in this prototype, and the timer is the only source of progress.
-  const outcome = demoOutcome(action ?? SELECTION_ACTIONS.EVIDENCE, question);
-  mount.state = outcome.ok
-    ? answer(mount.state, outcome)
-    : fail(mount.state, { message: outcome.error ?? "" });
-  mount.timer = null;
+  try {
+    const outcome = demoOutcome(action ?? SELECTION_ACTIONS.EVIDENCE, question);
+    mount.state = outcome.ok
+      ? answer(mount.state, outcome)
+      : fail(mount.state, { message: outcome.error ?? "" });
+  } catch (error) {
+    report(error, "reader panel answer");
+    // A thrown outcome must still end the flight, or the panel stays busy:
+    // turn it into a failure card the user can retry.
+    try {
+      mount.state = fail(mount.state, {
+        message: "本轮回答构造失败,已保留问题,可重试",
+      });
+    } catch (nested) {
+      report(nested, "reader panel failure card");
+    }
+  }
   paintStream(doc, mount);
 }
 
@@ -495,6 +512,31 @@ function disposeMount(doc: Document): void {
   mount.root.remove();
 }
 
+/**
+ * Drop entries whose panel is no longer in a live document.
+ *
+ * Closing a reader tab destroys its document but fires no event this plugin
+ * subscribes to, so without this sweep every closed PDF would keep its
+ * Document (and the whole panel DOM under `mount.root`) reachable through
+ * `mounts` for the rest of the session. `isConnected` is the check that needs
+ * no particular reader event name, which matters while the carrier is still
+ * undecided; a reader-closed event can be added on top once the acceptance
+ * run pins that event name down.
+ */
+function pruneDetachedMounts(): void {
+  for (const [doc, mount] of Array.from(mounts.entries())) {
+    if (mount.root.isConnected) {
+      continue;
+    }
+    mounts.delete(doc);
+    if (mount.timer !== null) {
+      clearTimeout(mount.timer);
+      mount.timer = null;
+    }
+    mount.root.remove();
+  }
+}
+
 /** Inject the stylesheet once per reader document. */
 function ensureStyle(doc: Document): void {
   if (doc.getElementById(STYLE_ID)) {
@@ -535,6 +577,7 @@ function appendPanelHost(doc: Document, root: HTMLElement, plan: CarrierPlan): v
 
 /** Open (or focus) the panel for one reader document. */
 function openPanel(doc: Document, plan: CarrierPlan): PanelMount {
+  pruneDetachedMounts();
   const existing = mounts.get(doc);
   if (existing) {
     return existing;
@@ -626,8 +669,9 @@ export const READER_EVENTS = Object.freeze({
   renderToolbar: onRenderToolbar,
 });
 
-/** Dispose every panel this plugin opened. */
+/** Dispose every panel this plugin opened, plus any whose document is gone. */
 export function disposeReaderPanels(): void {
+  pruneDetachedMounts();
   for (const doc of Array.from(mounts.keys())) {
     try {
       disposeMount(doc);

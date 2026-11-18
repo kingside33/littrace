@@ -511,3 +511,57 @@ test("finding 4609667207: the stream is replaced, so a stale progress row cannot
     "card nodes are still reused by id, so replaceChildren does not reset disclosure state",
   );
 });
+
+test("finding 4609678628: panels for a closed reader document are pruned, not leaked", () => {
+  const source = fs.readFileSync(PANEL_TS, "utf8");
+
+  assert.match(
+    source,
+    /function pruneDetachedMounts\(/,
+    "there must be a sweep for mounts whose document is gone",
+  );
+  const prune = functionBody(source, "pruneDetachedMounts");
+  assert.match(
+    prune,
+    /isConnected/,
+    "isConnected is the detachment check that needs no particular reader event name",
+  );
+  assert.match(prune, /mounts\.delete\(doc\)/, "a detached mount must leave the map");
+  assert.match(
+    prune,
+    /clearTimeout\(mount\.timer\)/,
+    "a detached mount's pending timer must be cancelled too",
+  );
+
+  const open = functionBody(source, "openPanel");
+  assert.match(
+    open,
+    /pruneDetachedMounts\(\)/,
+    "every open path must sweep first, so the map cannot grow across closed PDFs",
+  );
+});
+
+test("finding 4609678628: the in-flight marker is cleared before the outcome is built", () => {
+  const source = fs.readFileSync(PANEL_TS, "utf8");
+  const settle = functionBody(source, "settle");
+
+  const clearAt = settle.indexOf("mount.timer = null");
+  // Real call sites only: the prose comment above the clear line mentions
+  // `answer()` too, and matching that would compare against a comment.
+  const buildAt = Math.min(
+    ...["demoOutcome(", "answer(mount.state", "fail(mount.state"]
+      .map((needle) => settle.indexOf(needle))
+      .filter((index) => index !== -1),
+  );
+  assert.notEqual(clearAt, -1, "settle must clear the timer");
+  assert.notEqual(buildAt, Infinity, "settle must build an outcome");
+  assert.ok(
+    clearAt < buildAt,
+    "clearing after answer()/fail() leaves the marker set when they throw, which would refuse every later question forever",
+  );
+  assert.match(
+    settle,
+    /catch \(error\)/,
+    "a throwing outcome must be caught so the panel cannot stay busy",
+  );
+});
