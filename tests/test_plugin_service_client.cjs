@@ -268,6 +268,12 @@ test("the health verdict is tri-state and pure", async () => {
     ["above the ceiling", json({ service_version: "0.3.1", api_version: "v2" }), { maxServiceVersion: "0.3.0" }, "unsupported", "version-too-new"],
     ["inside a range", json({ service_version: "0.2.5", api_version: "v2" }), { minServiceVersion: "0.2.0", maxServiceVersion: "0.3.0" }, "available", null],
     ["custom floor, below", json({ service_version: "0.1.9", api_version: "v2" }), { minServiceVersion: "0.2.0" }, "unsupported", "version-too-old"],
+    // Explicit null disables a bound; only an absent key takes the default.
+    // `??` used to collapse the two, so "no floor" was unreachable.
+    ["explicitly no floor", json({ service_version: "0.0.1", api_version: "v2" }), { minServiceVersion: null }, "available", null],
+    ["explicitly no ceiling", json({ service_version: "9.9.9", api_version: "v2" }), { maxServiceVersion: null }, "available", null],
+    ["both bounds off", json({ service_version: "9.9.9", api_version: "v2" }), { minServiceVersion: null, maxServiceVersion: null }, "available", null],
+    ["absent keys keep the defaults", json({ service_version: "0.0.1", api_version: "v2" }), {}, "unsupported", "version-too-old"],
   ];
 
   for (const [label, response, requirements, state, reason] of cases) {
@@ -291,13 +297,25 @@ test("version comparison is numeric, not lexical", async () => {
 
 test("a misconfigured requirement is loud, not a disabled feature", async () => {
   const core = await loadCore();
+  const healthy = json({ service_version: "0.1.0", api_version: "v2" });
   assert.throws(
-    () =>
-      core.assessHealth(json({ service_version: "0.1.0", api_version: "v2" }), {
-        minServiceVersion: "not-a-version",
-      }),
+    () => core.assessHealth(healthy, { minServiceVersion: "not-a-version" }),
     TypeError,
+    "a floor that is not a version",
   );
+  assert.throws(
+    () => core.assessHealth(healthy, { maxServiceVersion: "1.x" }),
+    TypeError,
+    "a ceiling that is not a version",
+  );
+  // "Disabled" has exactly one spelling: null. A wrong type is a
+  // configuration bug, not a silently coerced bound.
+  assert.throws(() => core.assessHealth(healthy, { minServiceVersion: 1 }), TypeError);
+  assert.throws(() => core.assessHealth(healthy, { maxServiceVersion: {} }), TypeError);
+  // The protocol version cannot be disabled: a client that does not pin one
+  // cannot claim compatibility.
+  assert.throws(() => core.assessHealth(healthy, { apiVersion: null }), TypeError);
+  assert.throws(() => core.assessHealth(healthy, { apiVersion: "" }), TypeError);
 });
 
 test("the poller stops on a terminal state", async () => {

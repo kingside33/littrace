@@ -207,13 +207,39 @@ function health(state, reason, extra = {}) {
  *
  * @param {{ status?: number, text?: string }} response
  * @param {{ apiVersion?: string, minServiceVersion?: string | null, maxServiceVersion?: string | null }} requirements
+ *   A key that is absent takes the default; a key set to `null` explicitly
+ *   disables that bound. `??` would collapse the two, and "no floor" must be
+ *   expressible — silently reinstating the default is not an option.
  */
 export function assessHealth(response, requirements = {}) {
-  const apiVersion = requirements.apiVersion ?? DEFAULT_REQUIREMENTS.apiVersion;
+  const given = requirements || {};
+  const apiVersion =
+    "apiVersion" in given ? given.apiVersion : DEFAULT_REQUIREMENTS.apiVersion;
   const minServiceVersion =
-    requirements.minServiceVersion ?? DEFAULT_REQUIREMENTS.minServiceVersion;
+    "minServiceVersion" in given
+      ? given.minServiceVersion
+      : DEFAULT_REQUIREMENTS.minServiceVersion;
   const maxServiceVersion =
-    requirements.maxServiceVersion ?? DEFAULT_REQUIREMENTS.maxServiceVersion;
+    "maxServiceVersion" in given
+      ? given.maxServiceVersion
+      : DEFAULT_REQUIREMENTS.maxServiceVersion;
+  if (typeof apiVersion !== "string" || apiVersion.length === 0) {
+    // Unlike the two version bounds, the protocol version cannot be disabled:
+    // a client that does not pin one cannot claim compatibility.
+    throw new TypeError(
+      `littrace service client: apiVersion must be a non-empty string, got ${JSON.stringify(apiVersion)}`,
+    );
+  }
+  if (minServiceVersion !== null && typeof minServiceVersion !== "string") {
+    throw new TypeError(
+      `littrace service client: minServiceVersion must be a string or null, got ${JSON.stringify(minServiceVersion)}`,
+    );
+  }
+  if (maxServiceVersion !== null && typeof maxServiceVersion !== "string") {
+    throw new TypeError(
+      `littrace service client: maxServiceVersion must be a string or null, got ${JSON.stringify(maxServiceVersion)}`,
+    );
+  }
   const status = Number(response && response.status) || 0;
   if (status === 0) {
     return health(HEALTH_STATES.OFFLINE, "unreachable", { status });

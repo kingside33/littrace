@@ -25,7 +25,9 @@ export type HealthVerdict = {
 
 export type Requirements = {
   apiVersion?: string;
+  /** Absent = default floor. Explicit `null` = no floor check. */
   minServiceVersion?: string | null;
+  /** Absent = default ceiling (none). Explicit `null` = no ceiling check. */
   maxServiceVersion?: string | null;
 };
 
