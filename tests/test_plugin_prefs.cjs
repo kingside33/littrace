@@ -280,6 +280,52 @@ test("the port pref is validated, not trusted", async () => {
   assert.match(source, /serviceBaseUrl\(servicePort\(\)\)/);
 });
 
+test("a port change rebuilds the shared client instead of probing the old port", async () => {
+  const core = await loadCore();
+  // PR #36 review finding (service-client.ts:107): the shared client pinned
+  // its baseUrl at construction and lived until plugin shutdown, so every
+  // caller except the iframe tabs kept probing the port it was born with,
+  // while the diagnostic popup displayed the newly configured one.
+  assert.deepEqual({ ...core.CLIENT_ORIGINS }, { REUSE: "reuse", REBUILD: "rebuild" });
+  const same = "http://127.0.0.1:8765";
+  assert.equal(core.clientOriginVerdict(same, same), "reuse");
+  assert.equal(
+    core.clientOriginVerdict(same, core.serviceBaseUrl("9000")),
+    "rebuild",
+    "a different configured port must not reuse the cached client",
+  );
+  // A trailing slash is the same origin for these purposes only if it is
+  // normalised upstream; serviceBaseUrl never emits one, so a stray slash is
+  // treated as a difference and rebuilds (cheap, never wrong).
+  assert.equal(core.clientOriginVerdict(`${same}/`, same), "rebuild");
+  // No usable origin on either side: rebuilding is the only branch that can
+  // still reach a service.
+  for (const [current, desired] of [
+    [null, same],
+    [same, null],
+    ["", same],
+    [same, ""],
+    [undefined, undefined],
+  ]) {
+    assert.equal(core.clientOriginVerdict(current, desired), "rebuild");
+  }
+
+  // The adapter must consult the verdict and drop the cached token with the
+  // client it discards (a new port is a new service process, new token).
+  const source = read(SERVICE_CLIENT_TS);
+  assert.match(source, /const desired = serviceBaseUrlFromPrefs\(\);/);
+  assert.match(
+    source,
+    /clientOriginVerdict\(shared\.baseUrl, desired\) === CLIENT_ORIGINS\.REBUILD/,
+    "serviceClient() must compare the configured origin against the live client's",
+  );
+  assert.match(
+    source,
+    /if \(shared\) \{[\s\S]*?resetServiceClient\(\);[\s\S]*?\}\s*shared = createClient\(\{ baseUrl: desired \}\);/,
+    "rebuilding must drop the previous client (and its token) before creating the next",
+  );
+});
+
 test("the Pro group never claims 未授权 without an answer", async () => {
   const core = await loadCore();
   // M1 has no commercial layer running: null is 「商业层未运行」.

@@ -12,6 +12,7 @@ import {
   ServiceClientError,
 } from "./serviceClientCore.mjs";
 import { serviceBaseUrlFromPrefs } from "./prefs/serviceOrigin";
+import { CLIENT_ORIGINS, clientOriginVerdict } from "./prefs/prefsCore.mjs";
 
 /**
  * The Zotero adapter of the unified service client (S4).
@@ -114,12 +115,28 @@ export function createClient(
  * The plugin-wide client. One instance means one token cache: every feature
  * that submits or polls shares the session token instead of each fetching
  * its own (kbapp/web/service.py issues exactly one token per service start).
+ *
+ * The instance is reused only while the configured origin has not changed.
+ * A long-lived client pins `baseUrl` at construction (see `createClient`), so
+ * keeping it across a port change would leave the status dot, the diagnostics
+ * and the item columns probing the old port while the popup displays the new
+ * one. `clientOriginVerdict` (prefsCore) makes that comparison a tested
+ * decision instead of an assumption in a comment.
  */
 let shared: ServiceClient | null = null;
 
 export function serviceClient(): ServiceClient {
-  if (!shared) {
-    shared = createClient();
+  const desired = serviceBaseUrlFromPrefs();
+  if (
+    !shared ||
+    clientOriginVerdict(shared.baseUrl, desired) === CLIENT_ORIGINS.REBUILD
+  ) {
+    if (shared) {
+      // The cached session token belongs to the previous service process;
+      // dropping the client drops it too.
+      resetServiceClient();
+    }
+    shared = createClient({ baseUrl: desired });
   }
   return shared;
 }

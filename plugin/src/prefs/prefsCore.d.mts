@@ -50,6 +50,12 @@ export const PRO_STATES: Readonly<{
   UNKNOWN: "unknown";
 }>;
 export const PRO_KEYS: Readonly<Record<string, string>>;
+export const CLIENT_ORIGINS: Readonly<{ REUSE: "reuse"; REBUILD: "rebuild" }>;
+
+export function clientOriginVerdict(
+  currentBaseUrl: string | null | undefined,
+  desiredBaseUrl: string | null | undefined,
+): "reuse" | "rebuild";
 
 export function ftlId(key: string): string;
 export function prefKey(key: string): string;

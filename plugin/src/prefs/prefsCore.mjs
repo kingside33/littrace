@@ -265,6 +265,39 @@ export function serviceBaseUrl(port) {
   return `http://${SERVICE_HOST}:${normalizePort(port)}`;
 }
 
+/** Verdicts for a cached client whose origin may no longer be the configured one. */
+export const CLIENT_ORIGINS = Object.freeze({
+  REUSE: "reuse",
+  REBUILD: "rebuild",
+});
+
+/**
+ * Whether the plugin-wide client can be reused, or must be rebuilt.
+ *
+ * The client caches more than a URL: it holds the session token and one
+ * request origin for its whole life, and `serviceClient()` used to keep it
+ * until plugin shutdown. That made a port change invisible to every caller
+ * except the iframe tabs — the status dot, the diagnostics and the columns
+ * kept probing the old port while the diagnostic popup displayed the new one,
+ * which is the one combination that actively misleads.
+ *
+ * The rule is deliberately trivial and therefore testable: any difference
+ * between the origin the client was built with and the one the prefs name now
+ * means rebuild. Rebuilding drops the cached token, which is correct — the
+ * token is issued per service process (kbapp/web/service.py), so a different
+ * port is a different process with a different token.
+ */
+export function clientOriginVerdict(currentBaseUrl, desiredBaseUrl) {
+  const current = typeof currentBaseUrl === "string" ? currentBaseUrl.trim() : "";
+  const desired = typeof desiredBaseUrl === "string" ? desiredBaseUrl.trim() : "";
+  if (!current || !desired) {
+    // Without a usable origin on either side there is nothing to preserve:
+    // rebuilding is the only branch that can still reach the service.
+    return CLIENT_ORIGINS.REBUILD;
+  }
+  return current === desired ? CLIENT_ORIGINS.REUSE : CLIENT_ORIGINS.REBUILD;
+}
+
 /**
  * Pro group status from the commercial layer's `GET /license/status`.
  *
