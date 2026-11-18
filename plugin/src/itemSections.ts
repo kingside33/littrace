@@ -322,18 +322,29 @@ function openWorkbench(page: string, state: PanelState): void {
  * Submit a parse job through the S4 client, which owns the session token and
  * the request discipline. The button reports the outcome in place: a queued
  * job and a failure must not look the same.
+ *
+ * The submitted id is the *resolved* paper id from the snapshot, never the
+ * plugin's lookup key: `/api/documents/process` (document_api.py:127-136) does
+ * `papers().get(store.resolve(paper_id))`, and `store.resolve` does not map
+ * `z:<lib>:<key>` for a paper stored under a legacy `doi:` id — it returns the
+ * key unchanged, `papers.get(...)` is None, and the endpoint answers 400 with
+ * 「请选择库内文献」. The snapshot's `paper_id` is exactly that resolved id.
  */
 async function requestParse(
   doc: Document,
   state: PanelState,
   button: HTMLButtonElement,
 ): Promise<void> {
+  const paperId = paperIdFor(state);
+  if (!paperId) {
+    return;
+  }
   button.disabled = true;
   const previous = button.textContent;
   button.textContent = t("section-parse-submitting");
   try {
     const result = await addon.service.submitTask("/api/documents/process", {
-      paper_id: state.cacheKey,
+      paper_id: paperId,
     });
     // `queued` names a task; `started`/`running` are the service's idless
     // outcomes; `unknown` is not a success (S4 ADR 0020).

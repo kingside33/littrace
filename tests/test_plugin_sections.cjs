@@ -700,6 +700,11 @@ test("the async fill guards on both the cache key and the render generation", ()
 test("the parse button submits through the S4 client, not its own request", () => {
   const source = fs.readFileSync(SECTIONS_TS, "utf8");
   assert.match(source, /addon\.service\.submitTask\("\/api\/documents\/process"/);
+  // The submitted id is the resolved one, or a legacy doi: paper 400s.
+  const parse = source.slice(source.indexOf("async function requestParse("), source.indexOf("function report("));
+  assert.match(parse, /paperIdFor\(state\)/, "the parse job must use the resolved paper id");
+  assert.match(parse, /paper_id: paperId/, "the request body must not carry the raw cache key");
+  assert.ok(!/paper_id: state\.cacheKey/.test(parse), "the cache key must not be submitted as paper_id");
   // The snapshot goes through the one client too, so the token cache and the
   // errorDelayMax: 0 discipline are shared.
   assert.match(source, /addon\.service\.get\(snapshotPath\(/);
