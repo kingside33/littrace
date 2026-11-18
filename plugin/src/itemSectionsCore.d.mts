@@ -73,6 +73,7 @@ export type SectionRow =
       note: string;
     }
   | { kind: "coverage"; readPages: number; totalPages: number; state: string }
+  | { kind: "missing"; pages: number[] }
   | { kind: "page-class"; labelKey: string; value: string }
   | { kind: "gap"; text: string };
 

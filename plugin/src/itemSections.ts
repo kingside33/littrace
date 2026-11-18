@@ -241,6 +241,17 @@ function renderRow(
     return line;
   }
 
+  if (row.kind === "missing") {
+    // Which pages are unreadable, not just how many: the whole point of the
+    // section is answering that without switching to the web page.
+    const label = element(doc, "span", `${ROOT_CLASS}-label`);
+    label.textContent = t("section-reading-missing");
+    const value = element(doc, "span", `${ROOT_CLASS}-value`);
+    value.textContent = row.pages.map((page) => `p.${page}`).join("、");
+    line.append(label, value);
+    return line;
+  }
+
   // gap
   const gap = element(doc, "span", `${ROOT_CLASS}-gap`);
   gap.textContent = row.text;

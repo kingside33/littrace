@@ -203,6 +203,7 @@ class PaperSections(unittest.TestCase):
                 self.assertIn(f'reading-class-{name}', defined, f'{locale} 缺 reading-class-{name}')
             for state in reading_states:
                 self.assertIn(f'section-reading-state-{state}', defined, f'{locale} 缺 section-reading-state-{state}')
+            self.assertIn('section-reading-missing', defined, f'{locale} 缺缺失页文案')
 
 
 if __name__ == '__main__':

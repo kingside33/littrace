@@ -55,6 +55,7 @@ section-direction-following = 后作
 section-direction-unknown = 年份待核
 section-lineage-pending = 待核
 section-lineage-citations = 引用事实
+section-reading-missing = 缺失页
 section-reading-state-unparsed = 尚未精读
 section-reading-state-partial = 部分精读
 section-reading-state-complete = 精读完成

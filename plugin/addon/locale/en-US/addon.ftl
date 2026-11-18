@@ -57,6 +57,7 @@ section-direction-following = Later work
 section-direction-unknown = Year unverified
 section-lineage-pending = Pending
 section-lineage-citations = Citations
+section-reading-missing = Missing pages
 section-reading-state-unparsed = Not parsed
 section-reading-state-partial = Partially parsed
 section-reading-state-complete = Parsing complete

@@ -569,13 +569,30 @@ test("lineage rows carry direction and grade, never inventing either", async () 
   assert.equal(unknown[0].peerYear, null);
 });
 
-test("reading rows are coverage, then page classes, then gaps", async () => {
+test("reading rows are coverage, missing pages, then page classes and gaps", async () => {
   const { sectionRows } = await core();
   const rows = sectionRows("reading", snapshot());
   assert.deepEqual(rows[0], { kind: "coverage", readPages: 5, totalPages: 12, state: "partial" });
-  assert.deepEqual(rows[1], { kind: "page-class", labelKey: "reading-class-NATIVE_TEXT", value: "9" });
-  assert.deepEqual(rows[2], { kind: "page-class", labelKey: "reading-class-SCANNED", value: "3" });
-  assert.deepEqual(rows[3], { kind: "gap", text: "第9页不可读" });
+  // Which pages are missing is part of the requirement (issue #30 需求 1) and
+  // the payload already carries it.
+  assert.deepEqual(rows[1], { kind: "missing", pages: [9] });
+  assert.deepEqual(rows[2], { kind: "page-class", labelKey: "reading-class-NATIVE_TEXT", value: "9" });
+  assert.deepEqual(rows[3], { kind: "page-class", labelKey: "reading-class-SCANNED", value: "3" });
+  assert.deepEqual(rows[4], { kind: "gap", text: "第9页不可读" });
+});
+
+test("missing pages are omitted when there are none, and junk entries are dropped", async () => {
+  const { sectionRows } = await core();
+  const none = sectionRows("reading", snapshot({
+    reading: { state: "complete", read_pages: 12, total_pages: 12, missing_pages: [], gaps: [], classification: {}, documents: 1, can_parse: true },
+  }));
+  assert.deepEqual(none, [{ kind: "coverage", readPages: 12, totalPages: 12, state: "complete" }]);
+
+  // A malformed entry must not render as "p.NaN".
+  const junk = sectionRows("reading", snapshot({
+    reading: { state: "partial", read_pages: 1, total_pages: 4, missing_pages: ["x", 0, -2, null, 3], gaps: [], classification: {}, documents: 1, can_parse: true },
+  }));
+  assert.deepEqual(junk[1], { kind: "missing", pages: [3] });
 });
 
 test("canParse only offers the button when the snapshot says it is possible", async () => {

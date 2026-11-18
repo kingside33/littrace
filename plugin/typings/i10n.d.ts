@@ -51,6 +51,7 @@ export type FluentMessageId =
   | 'section-parse-submitting'
   | 'section-parse-unknown'
   | 'section-reading'
+  | 'section-reading-missing'
   | 'section-reading-state-complete'
   | 'section-reading-state-partial'
   | 'section-reading-state-stale'

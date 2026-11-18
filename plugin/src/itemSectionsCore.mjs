@@ -345,6 +345,16 @@ export function sectionRows(sectionID, snapshot) {
         state: String(reading.state || "unparsed"),
       },
     ];
+    // Which pages are missing is part of the requirement (issue #30 需求 1:
+    // 「已读/总页、缺失页」) and the service already sends it, so the section
+    // shows it instead of making the user open the web page to find out.
+    const missing = Array.isArray(reading.missing_pages) ? reading.missing_pages : [];
+    const pages = missing
+      .map((page) => Number(page))
+      .filter((page) => Number.isFinite(page) && page > 0);
+    if (pages.length > 0) {
+      rows.push({ kind: "missing", pages });
+    }
     const classification = reading.classification || {};
     for (const name of Object.keys(classification)) {
       if (!classification[name]) {
