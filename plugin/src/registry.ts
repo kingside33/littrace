@@ -4,6 +4,8 @@ import { createLineageColumn } from "./columns/lineage";
 import { createTabHost } from "./tabs/tabs";
 import { createItemSections, disposeItemSections } from "./itemSections";
 import { createReadingColumn } from "./columns/reading";
+import { createStatusDot } from "./status/status";
+import { prefBool, registerPreferencePane } from "./prefs/prefs";
 
 /**
  * The single registration entry of the plugin.
@@ -77,6 +79,14 @@ export async function registerAll(win: Window): Promise<void> {
   register(win, "iframe-tabs", () => {
     tabHost.dispose();
   });
+  // The toolbar service status dot (U5). Window-scoped: it is one node in this
+  // window's tab toolbar, and its probe timer, menu, diagnostic panel, style
+  // and listeners are all owned by the returned handle. A missing toolbar is
+  // logged and yields a no-op handle, never a throw that would cost the tabs.
+  const statusDot = createStatusDot(win);
+  register(win, "status-dot", () => {
+    statusDot.dispose();
+  });
   // Future features hook in here; each keeps its own
   // `register(win, id, dispose)`. Reader events and the item-tree column are
   // NOT registered here: see registerWindowIndependent() below.
@@ -105,17 +115,27 @@ export function registerWindowIndependent(): void {
   // from reading coverage, both read from one shared service cache. Each is
   // registered only when Zotero accepted its option; a rejection is already
   // logged and must not abort startup or the other column.
-  const lineage = createLineageColumn();
-  if (lineage.dataKey) {
-    registerGlobal("item-column:lineage", () => {
-      lineage.dispose();
-    });
+  //
+  // Each column has its own pref (U5's 「集成」group, one pref per feature).
+  // The pref is read here, at startup: unchecking it in the settings page
+  // takes effect on the next Zotero start, and the pane's description says so.
+  // Turning a column off only skips the registration — Zotero's own column
+  // chooser remains the per-tree switch.
+  if (prefBool("integration.column.lineage")) {
+    const lineage = createLineageColumn();
+    if (lineage.dataKey) {
+      registerGlobal("item-column:lineage", () => {
+        lineage.dispose();
+      });
+    }
   }
-  const reading = createReadingColumn();
-  if (reading.dataKey) {
-    registerGlobal("item-column:reading", () => {
-      reading.dispose();
-    });
+  if (prefBool("integration.column.reading")) {
+    const reading = createReadingColumn();
+    if (reading.dataKey) {
+      registerGlobal("item-column:reading", () => {
+        reading.dispose();
+      });
+    }
   }
   // 条目面板三 section(U2): 证据 / 谱系关系 / 精读. Process-wide like the
   // column and the reader events: ItemPaneManager keeps one section registry
@@ -142,6 +162,11 @@ export function registerWindowIndependent(): void {
   registerGlobal("item-sections:mounts", () => {
     disposeItemSections();
   });
+  // The settings page (U5). Process-wide: Zotero.PreferencePanes keeps one
+  // plugin pane list for the preferences window, so registering per main
+  // window would be a duplicate-id failure in preferencePanes.js. The pane id
+  // resolves asynchronously; the disposer handles both orders.
+  registerGlobal("preference-pane", registerPreferencePane());
 }
 
 /**
