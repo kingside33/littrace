@@ -313,7 +313,7 @@ test("planRender renders nothing for a row with no cache key", async () => {
 
 /* ── 4. Four states ──────────────────────────────────────────────────── */
 
-test("the four states are distinct and only error is retryable", async () => {
+test("the four states are distinct; only error and offline are retryable", async () => {
   const { loadingState, idleState, offlineState, errorState, PANEL_STATES } = await core();
 
   const loading = loadingState("z:1:A");
@@ -322,9 +322,11 @@ test("the four states are distinct and only error is retryable", async () => {
 
   const offline = offlineState("z:1:A");
   assert.equal(offline.status, PANEL_STATES.OFFLINE);
-  // The offline card is a guide, not a retry loop, and never silent.
+  // The offline card is a guide with a retry, never silent and never a loop:
+  // Zotero skips render() while [tabID, item.id] are unchanged, so without a
+  // button the card would be a dead end once the service starts.
   assert.equal(offline.messageKey, "section-offline");
-  assert.equal(offline.retryable, false);
+  assert.equal(offline.retryable, true);
 
   const failure = errorState("z:1:A", new Error("服务返回 500"));
   assert.equal(failure.status, PANEL_STATES.ERROR);
@@ -719,6 +721,24 @@ test("mounts are keyed by document, so one window cannot clobber another", () =>
   const change = source.slice(source.indexOf("onItemChange({"), source.indexOf("onRender({ doc, body, item }"));
   assert.match(change, /mountIn\(doc, sectionID\)/, "onItemChange only touches this window's mount");
   assert.ok(!/mounts\.get\(sectionID\)/.test(source), "no section-only lookup may remain");
+});
+
+test("the offline card offers a retry, and the copy promises only that", () => {
+  const source = fs.readFileSync(SECTIONS_TS, "utf8");
+  const note = functionBody(source, "renderNote");
+  assert.match(note, /state\.status === "offline" && state\.retryable/);
+  assert.match(note, /t\("section-retry"\)/, "the offline card gets a retry button");
+  // The retry must respect the render generation like the error retry does.
+  const stateRender = source.slice(source.indexOf('case "offline":'));
+  assert.match(stateRender.slice(0, 900), /generation\.isCurrent\(token\)/);
+
+  for (const locale of ["en-US", "zh-CN"]) {
+    const ftl = fs.readFileSync(FTL[locale], "utf8");
+    // The card must not claim the panel recovers on its own: nothing polls or
+    // probes, and Zotero skips render() for an unchanged item.
+    assert.ok(!/自动恢复|recovers on its own/i.test(ftl), `${locale} must not promise auto-recovery`);
+    assert.match(ftl, /section-offline-guide = .*(重试|Retry)/, `${locale} must point at the retry button`);
+  }
 });
 
 test("the async fill guards on both the cache key and the render generation", () => {

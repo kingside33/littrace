@@ -116,6 +116,7 @@ function renderNote(
   doc: Document,
   state: PanelState,
   onAction: (actionKey: string) => void,
+  onRetry: () => void,
 ): HTMLElement {
   const box = element(doc, "div", `${ROOT_CLASS}-note`);
   // The message key is the contract; a missing FTL entry falls back to the
@@ -138,6 +139,17 @@ function renderNote(
     action.textContent = t(state.actionKey);
     action.addEventListener("click", () => onAction(state.actionKey as string));
     box.append(action);
+  }
+
+  // An offline section gets a retry too. Zotero skips `render()` while
+  // `[tabID, item.id]` are unchanged, so nothing repaints by itself once the
+  // service comes back; without this button the card would be a dead end.
+  if (state.status === "offline" && state.retryable) {
+    const retry = element(doc, "button", `${ROOT_CLASS}-retry`);
+    retry.type = "button";
+    retry.textContent = t("section-retry");
+    retry.addEventListener("click", onRetry);
+    box.append(retry);
   }
   return box;
 }
@@ -410,13 +422,27 @@ function renderState(
       return token;
     case "empty":
     case "offline":
-      body.append(renderNote(doc, state, (actionKey) => {
-        if (actionKey === "section-open-lineage") {
-          openLineage(state);
-        } else {
-          openSearch(state);
-        }
-      }));
+      body.append(
+        renderNote(
+          doc,
+          state,
+          (actionKey) => {
+            if (actionKey === "section-open-lineage") {
+              openLineage(state);
+            } else {
+              openSearch(state);
+            }
+          },
+          // The same guard the error retry uses: a newer paint supersedes this
+          // card, so a click on the old one must not trigger a stale request.
+          () => {
+            if (!mount.generation.isCurrent(token)) {
+              return;
+            }
+            void paintSection(mount, sectionID, { force: true });
+          },
+        ),
+      );
       return token;
     case "error":
       body.append(

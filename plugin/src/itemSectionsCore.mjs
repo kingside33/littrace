@@ -145,7 +145,14 @@ export function idleState() {
 /**
  * The service could not be reached. This is deliberately NOT the error state:
  * the design contract says an offline panel shows a guide card ("需要本地服务"),
- * never a half-working section and never a bare retry loop.
+ * never a half-working section.
+ *
+ * It IS retryable, though. Zotero skips `render()` when `[tabID, item.id]` are
+ * unchanged (itemPaneSectionElementBase.mjs:133-155), so a section that went
+ * offline does not repaint on its own when the service comes back — scroll,
+ * focus and same-item refreshes all skip it. Without a button the user would
+ * be stuck until they switched items, which is why `retryable` is true here
+ * and the copy only promises what the button actually does.
  */
 export function offlineState(cacheKey) {
   return {
@@ -154,7 +161,7 @@ export function offlineState(cacheKey) {
     messageKey: "section-offline",
     actionKey: null,
     error: null,
-    retryable: false,
+    retryable: true,
     snapshot: null,
   };
 }
