@@ -304,6 +304,33 @@ export function resolveOpenPlan(preferred, options = {}) {
 }
 
 /**
+ * Whether one open tab can be reused for a new target, or its host is gone
+ * and must be reopened.
+ *
+ * The signals are raw and independent so the decision is testable without a
+ * DOM:
+ *   - `hostClosed`      the hosting tab or window announced that it closed;
+ *   - `iframeConnected` the iframe node is no longer in its document.
+ *
+ * Either one true means the recorded entry is stale: reusing it would retarget
+ * a dead node and report success while nothing is on screen. An UNKNOWN
+ * signal (undefined) counts as alive — a false "reopen" spawns duplicate
+ * windows, which is the worse failure.
+ */
+export function reuseVerdict(input = {}) {
+  if (!input || typeof input !== "object") {
+    return "reuse";
+  }
+  if (input.hostClosed === true) {
+    return "reopen";
+  }
+  if (input.iframeConnected === false) {
+    return "reopen";
+  }
+  return "reuse";
+}
+
+/**
  * Why a locate payload could not be turned into a tab target, or null when
  * it can. Kept separate from locateRequestOf so the caller can log the
  * refusal: silently ignoring a click is exactly the "点了没反应" state this

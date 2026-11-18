@@ -299,6 +299,25 @@ test("a refused locate payload says why instead of failing silently", async () =
   assert.match(core.locateRefusalOf("ABCD1234"), /载荷/);
 });
 
+test("a stale host is reopened, a live one is reused", async () => {
+  const core = await loadCore();
+  // Unknown signals count as alive: a false "reopen" would spawn a duplicate
+  // window, which is worse than reusing.
+  assert.equal(core.reuseVerdict({}), "reuse");
+  assert.equal(core.reuseVerdict(), "reuse");
+  assert.equal(core.reuseVerdict({ hostClosed: false }), "reuse");
+  assert.equal(core.reuseVerdict({ iframeConnected: true }), "reuse");
+  // A host that closed, or an iframe that left the document, is stale: the
+  // reuse branch would retarget a dead node and still report success.
+  assert.equal(core.reuseVerdict({ hostClosed: true }), "reopen");
+  assert.equal(core.reuseVerdict({ iframeConnected: false }), "reopen");
+  assert.equal(
+    core.reuseVerdict({ hostClosed: false, iframeConnected: false }),
+    "reopen",
+  );
+  assert.equal(core.reuseVerdict(null), "reuse");
+});
+
 test("the open mechanism falls back to the dialog, visibly", async () => {
   const core = await loadCore();
   assert.equal(core.DEFAULT_OPEN_MECHANISM, "zotero-tabs");
@@ -425,4 +444,37 @@ test("the tab entry stays internal until the tools menu lands", () => {
     /export function openFunctionTab\([\s\S]*?createTabHost\(/,
     "the entry must not create a host outside registerAll",
   );
+});
+
+test("a closed host is detected and removed instead of being reused", () => {
+  const source = fs.readFileSync(TABS_TS, "utf8");
+
+  // The reuse branch must consult the pure verdict first. Reusing a stale
+  // entry retargets a dead iframe and returns true while nothing is on
+  // screen: the "click does nothing, forever" failure.
+  assert.match(
+    source,
+    /const existing = opened\.get\(id\);[\s\S]*?if \(reuseVerdict\(existing\.signals\(\)\) === "reuse"\)/,
+    "the reuse branch must check liveness first",
+  );
+  assert.match(
+    source,
+    /closeOpened\(id, \{ hostAlreadyClosing: true \}\);[\s\S]*?const plan = resolveOpenPlan/,
+    "a stale entry must be reclaimed before the fresh mount",
+  );
+
+  // The fallback window fires no event this host owns, so it must wire its
+  // own close notification.
+  assert.match(source, /dialog\.addEventListener\("pagehide", markClosed\);/);
+  assert.match(source, /dialog\.addEventListener\("unload", markClosed\);/);
+  assert.match(
+    source,
+    /mountInDialog\(window, entry, spec, \(\) => \{[\s\S]*?closeOpened\(entry\.id, \{ hostAlreadyClosing: true \}\);/,
+    "the dialog must report its own close back to the host",
+  );
+
+  // Both mount paths expose the raw signals the verdict consumes.
+  const signalCount = (source.match(/signals: \(\) => \(/g) ?? []).length;
+  assert.equal(signalCount, 2, "both mount paths must provide signals()");
+  assert.match(source, /iframeConnected: iframe\.isConnected/);
 });

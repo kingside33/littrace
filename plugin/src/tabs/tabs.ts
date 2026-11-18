@@ -11,6 +11,7 @@ import {
   locateRefusalOf,
   locateRequestOf,
   resolveOpenPlan,
+  reuseVerdict,
   tabById,
   tabNodeSpec,
 } from "./tabsCore.mjs";
@@ -76,6 +77,13 @@ interface OpenedTab {
   focusHost: () => void;
   /** Release the hosting tab or window; must not call back into this host. */
   closeHost: () => void;
+  /**
+   * Raw liveness signals for the reuse decision. `hostClosed` is set by a
+   * host that announced its own close; `iframeConnected` is the node's own
+   * `isConnected`. Both are handed to the pure `reuseVerdict()` so the rule
+   * lives in one tested place.
+   */
+  signals: () => { hostClosed?: boolean; iframeConnected?: boolean };
 }
 
 export interface TabHost {
@@ -191,13 +199,20 @@ function buildHost(win: Window): TabHost {
 
     const existing = opened.get(id);
     if (existing) {
-      // Already open: retarget the same iframe at the new deep link instead
-      // of opening a second one, then bring its host to the front.
-      if (existing.iframe.src !== spec.src) {
-        existing.iframe.src = spec.src;
+      // A closed host leaves a stale entry. Reusing it would retarget a dead
+      // iframe and return true while nothing is on screen -- the "click does
+      // nothing, forever" state. Detect it, reclaim the stale entry, and fall
+      // through to a fresh mount instead.
+      if (reuseVerdict(existing.signals()) === "reuse") {
+        // Already open: retarget the same iframe at the new deep link instead
+        // of opening a second one, then bring its host to the front.
+        if (existing.iframe.src !== spec.src) {
+          existing.iframe.src = spec.src;
+        }
+        existing.focusHost();
+        return true;
       }
-      existing.focusHost();
-      return true;
+      closeOpened(id, { hostAlreadyClosing: true });
     }
 
     const plan = resolveOpenPlan(OPEN_MECHANISM, {
@@ -221,7 +236,12 @@ function buildHost(win: Window): TabHost {
     }
 
     try {
-      adopt(entry.id, mountInDialog(window, entry, spec));
+      adopt(
+        entry.id,
+        mountInDialog(window, entry, spec, () => {
+          closeOpened(entry.id, { hostAlreadyClosing: true });
+        }),
+      );
       return true;
     } catch (error) {
       report(error, "打开 tab");
@@ -416,6 +436,13 @@ function mountInZoteroTab(
   try {
     const iframe = createIframe(window, entry, spec);
     container.append(iframe);
+    // The deck's own close notification is not a public API, so `hostClosed`
+    // is only a signal: `isConnected` (checked below) is the one that holds
+    // even when the option name is ignored by the real build.
+    let hostClosed = false;
+    const markClosed = (): void => {
+      hostClosed = true;
+    };
     return {
       iframe,
       focusHost: () => {
@@ -426,8 +453,13 @@ function mountInZoteroTab(
         }
       },
       closeHost: () => {
+        markClosed();
         closeZoteroTab(tabs, tabID);
       },
+      signals: () => ({
+        hostClosed,
+        iframeConnected: iframe.isConnected,
+      }),
     };
   } catch (error) {
     closeZoteroTab(tabs, tabID);
@@ -476,11 +508,18 @@ function closeZoteroTab(tabs: ZoteroTabsAPI, tabID: string): void {
  * The fallback: a standalone chrome window (`window.openDialog`) that hosts
  * the same iframe. The document is ours, so no Zotero internal is touched;
  * closing the window is the whole cleanup.
+ *
+ * A user closing this window is the normal way to end it, and it fires no
+ * event this host owns. Two listeners therefore report it back through
+ * `onHostClose` (`pagehide` for the in-flight close, `unload` as the
+ * backbone) so the entry is dropped from `opened` and from the cleanup table
+ * instead of lingering as a dead entry that makes the tab unopenable.
  */
 function mountInDialog(
   window: Window,
   entry: TabEntry,
   spec: TabNodeSpec,
+  onHostClose: () => void,
 ): OpenedTab {
   const chromeWindow = window as unknown as {
     openDialog?: (url: string, name: string, features: string) => Window | null;
@@ -505,6 +544,30 @@ function mountInDialog(
     }
     throw new Error(`独立窗口 "${entry.id}" 没有可用文档`);
   }
+
+  let hostClosed = false;
+  let notified = false;
+  const markClosed = (): void => {
+    if (hostClosed) {
+      return;
+    }
+    hostClosed = true;
+    if (notified) {
+      return;
+    }
+    notified = true;
+    try {
+      dialog.removeEventListener("pagehide", markClosed);
+      dialog.removeEventListener("unload", markClosed);
+    } catch {
+      // 窗口已销毁: 没有监听可移除。
+    }
+    onHostClose();
+  };
+  // Registered before anything else so a close during setup is still seen.
+  dialog.addEventListener("pagehide", markClosed);
+  dialog.addEventListener("unload", markClosed);
+
   doc.title = t(entry.titleKey);
   const style = doc.createElement("style");
   style.textContent =
@@ -523,12 +586,24 @@ function mountInDialog(
       }
     },
     closeHost: () => {
+      // A host-initiated close must not re-enter onHostClose; markClosed
+      // covers the user-initiated one.
+      hostClosed = true;
+      notified = true;
       try {
         dialog.close();
       } catch (error) {
         report(error, "关闭独立窗口");
       }
     },
+    signals: () => ({
+      // A chrome window that is gone reports `closed`; an about:blank dialog
+      // keeps its own liveness too.
+      hostClosed:
+        hostClosed ||
+        (dialog as unknown as { closed?: boolean }).closed === true,
+      iframeConnected: iframe.isConnected,
+    }),
   };
 }
 

@@ -59,6 +59,12 @@ export interface LocateRequest {
   paper: string;
 }
 
+export type ReuseVerdict = "reuse" | "reopen";
+
+export interface ReuseSignals {
+  hostClosed?: boolean;
+  iframeConnected?: boolean;
+}
 
 export declare const TAB_REGISTRY: readonly TabEntry[];
 export declare const TAB_IDS: readonly TabId[];
@@ -88,3 +94,4 @@ export declare function resolveOpenPlan(
 ): OpenPlan;
 export declare function locateRequestOf(detail: unknown): LocateRequest | null;
 export declare function locateRefusalOf(detail: unknown): string | null;
+export declare function reuseVerdict(input?: ReuseSignals): ReuseVerdict;
