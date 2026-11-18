@@ -197,6 +197,45 @@ class PaperResponse(BaseModel):
     references: dict | None = None
 
 
+class PaperSectionsEvidence(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    indexed: bool = False
+    index_version: str | None = None
+    counts: dict[str, int] = {}
+    total: int = 0
+    excerpts: list[dict] = []
+
+
+class PaperSectionsLineage(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    verified: int = 0
+    pending: int = 0
+    citations: int = 0
+    items: list[dict] = []
+
+
+class PaperSectionsReading(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    state: str = 'unparsed'
+    total_pages: int = 0
+    read_pages: int = 0
+    missing_pages: list[int] = []
+    gaps: list[str] = []
+    classification: dict[str, int] = {}
+    documents: int = 0
+    can_parse: bool = False
+
+
+class PaperSectionsResponse(BaseModel):
+    """条目面板三 section 的只读快照（U2）。"""
+    model_config = ConfigDict(extra='allow')
+    paper_id: str
+    title: str = ''
+    evidence: PaperSectionsEvidence = PaperSectionsEvidence()
+    lineage: PaperSectionsLineage = PaperSectionsLineage()
+    reading: PaperSectionsReading = PaperSectionsReading()
+
+
 class ApiMeta(BaseModel):
     api_version: str = 'v2'
     source_kinds: list[str]

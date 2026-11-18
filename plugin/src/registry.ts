@@ -2,6 +2,7 @@ import { createRegistry } from "./registryCore.mjs";
 import { registerReaderEvents } from "./readerPanel";
 import { createLineageColumn } from "./columns/lineage";
 import { createTabHost } from "./tabs/tabs";
+import { createItemSections, disposeItemSections } from "./itemSections";
 
 /**
  * The single registration entry of the plugin.
@@ -107,6 +108,31 @@ export function registerWindowIndependent(): void {
       lineage.dispose();
     });
   }
+  // 条目面板三 section(U2): 证据 / 谱系关系 / 精读. Process-wide like the
+  // column and the reader events: ItemPaneManager keeps one section registry
+  // that every item pane reads, so registering per window would duplicate
+  // every section (ADR 0009). Sections Zotero rejected are skipped and logged
+  // (createSectionRegistration never throws); one bad section must not cost
+  // the other two.
+  for (const section of createItemSections()) {
+    if (!section.dataKey) {
+      const paneID = (section.option as { paneID?: string } | null)?.paneID ?? "?";
+      Zotero.logError(
+        new Error(
+          `littrace: 条目面板 section「${paneID}」注册失败(Zotero 拒绝了 section 选项),该 section 暂不可用。`,
+        ),
+      );
+      continue;
+    }
+    registerGlobal(`item-section:${section.dataKey}`, () => {
+      section.dispose();
+    });
+  }
+  // The mounts and the snapshot cache outlive individual sections; release
+  // them once, after the registrations above.
+  registerGlobal("item-sections:mounts", () => {
+    disposeItemSections();
+  });
 }
 
 /**
