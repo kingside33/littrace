@@ -40,6 +40,9 @@ report.xml
 /tmp/
 /.tmp-*
 
+# 分支工作区：并行会话一律在独立 worktree 里工作（见 AGENTS.md「会话卫生」）
+.worktrees/
+
 # 本机环境与密钥
 .env
 .env.*
