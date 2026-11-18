@@ -36,3 +36,11 @@
 | [0019](0019-s4-transport-non-2xx-as-response.md) | [S4] 传输层把非 2xx 当响应返回 | 只有无响应才是 status 0,错误分类成为可测试的纯函数 |
 | [0020](0020-s4-idless-submit-is-outcome.md) | [S4] 无任务 ID 的提交是结论而非错误 | submitTask 返回带 outcome 的判别式结论,不再把成功报成失败 |
 | [0021](0021-s4-requirements-missing-vs-null.md) | [S4] requirements 区分「未提供」与「显式 null」 | 缺键取默认、null 关闭边界、其他类型抛错 |
+| [0022](0022-u1-v2-paper-readonly-refresh-references.md) | [U1] v2 文献详情默认不排队,refresh_references 显式 opt-in | 只读端点不得写 reference_jobs,v1 契约保持不变 |
+| [0023](0023-u1-bounded-column-request-queue.md) | [U1] 列请求经固定上限 6 的有界队列发出 | 排序逐行取数不得对单进程服务抛出全库并发 |
+| [0024](0024-u1-repaint-strategy-sort-vs-refresh.md) | [U1] 重绘按当前排序列选择重排或刷新 | 只在本列为排序字段时全量 re-sort,避免已有行永不重排 |
+| [0025](0025-u1-merge-main-to-restore-pr-ci.md) | [U1] 合入 main 解除冲突以恢复 PR CI | 冲突时 CI 静默不跑,不能当作已跑门禁 |
+| [0026](0026-u2-merge-not-rebase-preserve-hashes.md) | [U2] 用 merge 而非 rebase 合入已前进的 main | 保住所引用修复提交的哈希,评审可回溯 |
+| [0027](0027-u2-review-findings-test-anchors-verified-red.md) | [U2] 每条评审发现配可脱机锚定并验证会红 | 特权上下文不写假单测,用文本锁定 + 行为断言 |
+| [0028](0028-u4-locate-identity-requires-library-id.md) | [U4] 谱系定位用 `z:<libraryID>:<key>`,缺库 ID 则拒绝 | 裸 Zotero key 解析不到,猜默认库会错定位 |
+| [0029](0029-u4-host-liveness-pure-verdict-dialog-dual-listeners.md) | [U4] 宿主存活判定抽成纯函数,dialog 双监听 | 未知信号按存活处理,pagehide + unload 双保险 |
