@@ -44,3 +44,10 @@
 | [0027](0027-u2-review-findings-test-anchors-verified-red.md) | [U2] 每条评审发现配可脱机锚定并验证会红 | 特权上下文不写假单测,用文本锁定 + 行为断言 |
 | [0028](0028-u4-locate-identity-requires-library-id.md) | [U4] 谱系定位用 `z:<libraryID>:<key>`,缺库 ID 则拒绝 | 裸 Zotero key 解析不到,猜默认库会错定位 |
 | [0029](0029-u4-host-liveness-pure-verdict-dialog-dual-listeners.md) | [U4] 宿主存活判定抽成纯函数,dialog 双监听 | 未知信号按存活处理,pagehide + unload 双保险 |
+| [0030](0030-u3-answer-via-async-agent-run-polling.md) | [U3] 问答走异步 agent-run + 轮询 | 同步接口必然超 10 秒且无中间事件,异步两段式才能给出单调进度 |
+| [0031](0031-u3-missing-cloud-key-guide-card-no-retry.md) | [U3] 云 key 缺失只给引导卡片、不重试 | 不创建注定失败的任务,引导卡片的 retry 恒为 null |
+| [0032](0032-u3-deep-link-trust-server-same-paper-only.md) | [U3] 跳页只信服务端深链与同篇附件 key | 跨文献猜附件 key 会打开另一篇 PDF,不可点就不渲染成按钮 |
+| [0033](0033-u3-lineage-reuse-graph-endpoint.md) | [U3] 「问谱系」复用 GET /api/graph,缺标识即拒绝 | 空 paper 返回全库节点,像答案实非答案,因此直接拒绝 |
+| [0034](0034-u3-gap-hint-by-cause.md) | [U3] 缺口卡片按成因给提示 | warning 与截断不是「无证据」,共用文案会否定上方的证据 |
+| [0035](0035-u5-client-origin-pure-verdict.md) | [U5] 端口变更以纯函数判定是否重建客户端 | 任何 origin 差异即重建,令牌随旧客户端丢弃 |
+| [0036](0036-u5-last-sync-by-state-not-timestamp.md) | [U5] 上次同步按 export_sync 状态判定 | 三次写入都刷新 updated,只看时间戳会把失败读成成功 |
