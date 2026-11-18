@@ -382,7 +382,11 @@ test("the settings page is registered through the plugin's single entry", async 
   assert.match(prefs, /Zotero\.PreferencePanes/);
   assert.match(prefs, /src: "content\/preferences\.xhtml"/);
   assert.match(prefs, /pluginID: config\.addonID/);
-  assert.match(prefs, /id: "littrace-preferences"/);
+  // The id is a named constant because the offline guide card (U6) navigates
+  // to this pane with openPreferences(PANE_ID); both halves are asserted so
+  // the constant cannot drift away from the id actually registered.
+  assert.match(prefs, /export const PANE_ID = "littrace-preferences";/);
+  assert.match(prefs, /id: PANE_ID,/);
 
   // The plugin's own pref-driven behaviours read the table, not a literal key.
   assert.match(prefs, /prefEntry\(key\)/);

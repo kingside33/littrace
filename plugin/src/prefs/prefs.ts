@@ -59,6 +59,13 @@ export function serviceOrigin(): string {
 }
 
 /**
+ * The pane id passed to `PreferencePanes.register`. `openPreferences(paneID)`
+ * navigates by this exact id (xpcom/preferencePanes.js keeps the given id), so
+ * the offline guide card's 「打开设置页」 button needs the same constant.
+ */
+export const PANE_ID = "littrace-preferences";
+
+/**
  * Register the pane through Zotero.PreferencePanes and return the disposer
  * for src/registry.ts.
  *
@@ -91,7 +98,7 @@ export function registerPreferencePane(): () => void {
 
   const pending = panes.register({
     pluginID: config.addonID,
-    id: "littrace-preferences",
+    id: PANE_ID,
     // Relative to the plugin root; Zotero resolves it with
     // Zotero.Plugins.resolveURI (preferencePanes.js register()).
     src: "content/preferences.xhtml",

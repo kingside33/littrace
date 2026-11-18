@@ -89,8 +89,30 @@ const STYLE_TEXT = `
 export interface StatusDot {
   /** Probe once and repaint. Safe to call at any time; no-op after dispose. */
   refresh(): Promise<void>;
+  /**
+   * Open the diagnostic popup, if this window has a mounted dot. False means
+   * "no dot in this window"; the caller says so instead of doing nothing
+   * (the tools menu's 「服务诊断」 entry, U6).
+   */
+  openDiagnostics(): boolean;
   /** Remove the dot, menu, panel, listeners, timers and style this host owns. */
   dispose(): void;
+}
+
+/**
+ * The dot of each open main window. The menus (U6) are registered
+ * process-wide, so when 「服务诊断」 fires they need *this* window's dot rather
+ * than a captured one; a closed window's entry is dropped by `dispose()`.
+ */
+const dots = new Map<Window, StatusDot>();
+
+/**
+ * Open the diagnostic popup of `win`. Exported for the tools menu; returns
+ * false when the toolbar (and therefore the dot) was never mounted.
+ */
+export function openWindowDiagnostics(win: Window): boolean {
+  const dot = dots.get(win);
+  return dot ? dot.openDiagnostics() : false;
 }
 
 function report(error: unknown, what: string): void {
@@ -161,7 +183,13 @@ export function createStatusDot(win: Window): StatusDot {
     // No host toolbar: log once and return a no-op handle. Throwing here
     // would abort the rest of registerAll and cost every other feature.
     report(new Error("未找到 Zotero 工具栏节点,状态点未挂载"), "挂载");
-    return { async refresh() {}, dispose() {} };
+    return {
+      async refresh() {},
+      openDiagnostics() {
+        return false;
+      },
+      dispose() {},
+    };
   }
 
   const style = doc.createElementNS(HTML_NS, "style") as HTMLStyleElement;
@@ -395,13 +423,25 @@ export function createStatusDot(win: Window): StatusDot {
 
   void refresh();
 
-  return {
+  // The tools menu (U6) asks this window's dot to open its popup; keeping the
+  // handle per window here means the menu never has to capture one window's
+  // dot for a command that fires in another.
+  const showDiagnostics = openDiagnostics;
+  const handle: StatusDot = {
     refresh,
+    openDiagnostics() {
+      if (disposed) {
+        return false;
+      }
+      showDiagnostics();
+      return true;
+    },
     dispose() {
       if (disposed) {
         return;
       }
       disposed = true;
+      dots.delete(win);
       if (timer !== null) {
         win.clearTimeout(timer);
         timer = null;
@@ -418,4 +458,6 @@ export function createStatusDot(win: Window): StatusDot {
       }
     },
   };
+  dots.set(win, handle);
+  return handle;
 }

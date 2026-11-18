@@ -3,6 +3,7 @@ import hooks from "./hooks";
 import { serviceClient } from "./service-client";
 import type { ServiceClient } from "./service-client";
 import { prefsPane } from "./prefs/prefs";
+import { comparisonSet } from "./menus/menus";
 
 /**
  * The single plugin instance. Holds shared state and the lifecycle hooks;
@@ -46,6 +47,19 @@ class Addon {
    */
   get prefsPane(): typeof prefsPane {
     return prefsPane;
+  }
+
+  /**
+   * The in-memory comparison set (U6), as service paper ids.
+   *
+   * 「加入对比集」 fills it from the item context menu. U3's reader panel does
+   * not expose a comparison entry yet, so this accessor is the reserved
+   * consumer interface: when that entry lands it reads
+   * `Zotero.Littrace.comparisonSet` instead of growing a second set. The set
+   * is process memory on purpose and is emptied on shutdown.
+   */
+  get comparisonSet(): ReadonlyArray<string> {
+    return comparisonSet();
   }
 }
 

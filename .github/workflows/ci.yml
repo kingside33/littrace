@@ -164,6 +164,7 @@ jobs:
             tests/test_plugin_column.cjs
             tests/test_plugin_hooks.cjs
             tests/test_plugin_manifest.cjs
+            tests/test_plugin_menus.cjs
             tests/test_plugin_prefs.cjs
             tests/test_plugin_reader.cjs
             tests/test_plugin_registry.cjs
@@ -218,6 +219,7 @@ jobs:
             tests/test_plugin_column.cjs \
             tests/test_plugin_hooks.cjs \
             tests/test_plugin_manifest.cjs \
+            tests/test_plugin_menus.cjs \
             tests/test_plugin_prefs.cjs \
             tests/test_plugin_reader.cjs \
             tests/test_plugin_registry.cjs \
