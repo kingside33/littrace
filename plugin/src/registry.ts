@@ -1,3 +1,5 @@
+import { createRegistry } from "./registryCore.mjs";
+
 /**
  * The single registration entry of the plugin.
  *
@@ -5,52 +7,69 @@
  * sections, reader panels, menus, notifiers, deep-link bridges) must do two
  * things here and nowhere else:
  *   1. perform the registration inside `registerAll`, and
- *   2. hand a disposer to `register` so it can be reclaimed.
+ *   2. hand a disposer to `register(win, id, dispose)` so it can be reclaimed.
  *
- * `unregisterAll` disposes in reverse order and is wired to
- * onMainWindowUnload / shutdown in src/hooks.ts, so disabling or uninstalling
- * the plugin reclaims every window-level registration in one pass.
+ * Scoping: Zotero can have several main windows open at once, and startup
+ * runs `registerAll` once per existing window. Registrations are therefore
+ * keyed by (window, id): the same id may be registered once per window, and
+ * a duplicate id is an error only within one window. Closing a window
+ * disposes only that window's entries; shutdown disposes everything.
+ *
+ * The bookkeeping itself lives in registryCore.mjs (plain ESM, no Zotero
+ * globals) so tests/test_plugin_registry.cjs can exercise it directly.
  */
 
 export type Disposer = () => void;
 
-interface Registration {
-  id: string;
-  dispose: Disposer;
-}
-
-const registrations: Array<Registration> = [];
+const registry = createRegistry((error: unknown, id: string) => {
+  Zotero.logError(
+    error instanceof Error
+      ? new Error(`littrace: registration "${id}" disposer failed: ${error.message}`)
+      : (error as Error),
+  );
+});
 
 /**
- * Record a feature's disposer. Throws on a duplicate id so two features
- * cannot silently fight over one slot.
+ * Register `id` for one main window. Registering the same id for a different
+ * window is expected; registering it twice for the same window throws.
  */
-export function register(id: string, dispose: Disposer): void {
-  if (registrations.some((entry) => entry.id === id)) {
-    throw new Error(`littrace: duplicate registration id: ${id}`);
+export function register(win: Window, id: string, dispose: Disposer): void {
+  registry.register(win, id, dispose);
+}
+
+/**
+ * Register something window-independent (a notifier or deep-link bridge).
+ * Reclaimed on shutdown, not when an individual window closes.
+ */
+export function registerGlobal(id: string, dispose: Disposer): void {
+  registry.registerGlobal(id, dispose);
+}
+
+/**
+ * Register every window-level feature. Called once per main-window load;
+ * the window is claimed first so the same window arriving through two
+ * startup paths is not registered twice.
+ */
+export async function registerAll(win: Window): Promise<void> {
+  if (!registry.claimWindow(win)) {
+    return;
   }
-  registrations.push({ id, dispose });
+  // Future features hook in here; each keeps its own
+  // `register(win, id, dispose)`.
 }
 
 /**
- * Register every feature. Called once per main-window load; feature code
- * that is window-independent must guard its own re-entry and key its
- * disposers off the window it was handed.
+ * Dispose only this window's registrations, in reverse order. Called when
+ * that one window closes, so other open windows keep their registrations.
  */
-export async function registerAll(_win: Window): Promise<void> {
-  // Future features hook in here; each keeps its own `register(id, dispose)`.
+export function unregisterWindow(win: Window): void {
+  registry.unregisterWindow(win);
 }
 
 /**
- * Dispose every live registration in reverse order. Safe to call twice.
+ * Dispose every registration for every window plus the globals. Only for
+ * shutdown: disabling or uninstalling the plugin must reclaim everything.
  */
 export function unregisterAll(): void {
-  while (registrations.length > 0) {
-    const entry = registrations.pop() as Registration;
-    try {
-      entry.dispose();
-    } catch (error) {
-      Zotero.logError(error);
-    }
-  }
+  registry.unregisterEverything();
 }
