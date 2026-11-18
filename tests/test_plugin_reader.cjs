@@ -1293,6 +1293,48 @@ test("U3 wiring: a citation click jumps, and copies when the host cannot", () =>
   );
 });
 
+test("U3 wiring: the in-flight slot is claimed before the form is painted", () => {
+  const source = fs.readFileSync(PANEL_TS, "utf8");
+
+  // syncFormState() reads canAsk(), which reads mount.flight. If the slot is
+  // claimed after the paint, the submit button stays live for the whole
+  // request: A3 only got away with it because the flight lasted 350 ms.
+  for (const [name, marker] of [
+    ["run", "mount.state = ask("],
+    ["retryCard", "mount.state = retry("],
+  ]) {
+    const body = functionBody(source, name);
+    const claimAt = body.indexOf("beginFlight(mount)");
+    const paintAt = body.indexOf("syncFormState(mount)");
+    assert.notEqual(claimAt, -1, `${name} must claim the in-flight slot`);
+    assert.notEqual(paintAt, -1, `${name} must sync the form`);
+    assert.ok(
+      claimAt < paintAt,
+      `${name} claims the flight after syncFormState, so the submit button stays enabled for the whole request`,
+    );
+    assert.ok(
+      body.indexOf(marker) < paintAt,
+      `${name} must paint its card before the form sync`,
+    );
+  }
+
+  // dispatch() must not start a second flight: the caller owns the slot, and a
+  // second beginFlight would invalidate the caller's own epoch.
+  const dispatch = functionBody(source, "dispatch");
+  assert.doesNotMatch(
+    dispatch,
+    /beginFlight\(/,
+    "dispatch receives the claimed flight instead of starting another",
+  );
+  for (const body of ["runAnswer", "runRead"]) {
+    assert.doesNotMatch(
+      functionBody(source, body),
+      /beginFlight\(/,
+      `${body} must use the caller's flight, not claim its own`,
+    );
+  }
+});
+
 test("U3 wiring: dispose stops the in-flight request and a stale answer cannot paint", () => {
   const source = fs.readFileSync(PANEL_TS, "utf8");
 

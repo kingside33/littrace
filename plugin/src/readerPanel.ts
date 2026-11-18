@@ -515,7 +515,14 @@ function citationContext(mount: PanelMount): CitationContext {
 }
 
 /**
- * Mark a request in flight and give the caller an epoch to check.
+ * Claim the in-flight slot and give the caller an epoch to check.
+ *
+ * Called BEFORE the question card and the progress row are painted, so
+ * `canAsk()` is already false when `syncFormState()` runs: the submit button is
+ * disabled and the placeholder says why for the whole request, not only after
+ * the first await. (The A3 ordering — paint, then start — was invisible when a
+ * "request" was a 350 ms timer; with a real run it would leave the button live
+ * for the entire answer.)
  *
  * `alive()` is false as soon as any newer flight starts or the panel is torn
  * down, so a slow response for a question asked in another PDF can never paint
@@ -535,26 +542,33 @@ function beginFlight(mount: PanelMount): FlightGuard {
   };
 }
 
-/** The single dispatch for the three entries: ask, evidence, lineage. */
+/**
+ * The single dispatch for the three entries: ask, evidence, lineage.
+ *
+ * The caller has already claimed the in-flight slot (see run()), so a request
+ * started here is visible on the form from the moment it exists.
+ */
 function dispatch(
   doc: Document,
   mount: PanelMount,
   request: ReturnType<typeof requestFor>,
+  flight: FlightGuard,
 ): void {
   if (request.kind === REQUEST_KINDS.BLOCKED) {
     // Not retryable config: the question itself cannot be formed (no paper
     // identity for the lineage endpoint). Say so on a failure card, which
     // keeps the retry entry — once the paper is indexed it will work.
+    // Nothing was sent, so no request is in flight; settle() clears the slot.
     settle(doc, mount, () => {
       mount.state = fail(mount.state, { message: request.message });
     });
     return;
   }
   if (request.kind === REQUEST_KINDS.READ) {
-    void runRead(doc, mount, request);
+    void runRead(doc, mount, request, flight);
     return;
   }
-  void runAnswer(doc, mount, request);
+  void runAnswer(doc, mount, request, flight);
 }
 
 /**
@@ -570,8 +584,8 @@ async function runAnswer(
   doc: Document,
   mount: PanelMount,
   request: Extract<ReturnType<typeof requestFor>, { kind: "run" }>,
+  flight: FlightGuard,
 ): Promise<void> {
-  const flight = beginFlight(mount);
   try {
     const status = await addon.service.get(SERVICE_ENDPOINTS.STATUS);
     if (!flight.alive()) {
@@ -649,8 +663,8 @@ async function runRead(
   doc: Document,
   mount: PanelMount,
   request: Extract<ReturnType<typeof requestFor>, { kind: "read" }>,
+  flight: FlightGuard,
 ): Promise<void> {
-  const flight = beginFlight(mount);
   try {
     const payload = await addon.service.get(request.path);
     if (!flight.alive()) {
@@ -714,8 +728,13 @@ function run(
     showMessage(mount, errorMessage(error));
     return false;
   }
+  // Claim the in-flight slot BEFORE painting: syncFormState() reads canAsk(),
+  // and a request is only really "in flight" once this is set. Painting first
+  // would leave the submit button live until the first await resolves.
+  let flight: FlightGuard;
   try {
     clearNotice(mount);
+    flight = beginFlight(mount);
     mount.state = ask(mount.state, question, {
       source: sourceForAction(action),
     });
@@ -727,11 +746,13 @@ function run(
     paintStream(doc, mount);
   } catch (error) {
     report(error, "reader panel question");
+    // A failed paint must not leave the panel permanently busy.
+    mount.flight = null;
     syncFormState(mount);
     paintStream(doc, mount);
     return false;
   }
-  dispatch(doc, mount, request);
+  dispatch(doc, mount, request, flight);
   return true;
 }
 
@@ -808,6 +829,7 @@ function retryCard(doc: Document, mount: PanelMount, cardId: string): void {
     return;
   }
   let request: ReturnType<typeof requestFor>;
+  let flight: FlightGuard;
   try {
     mount.state = retry(mount.state, cardId);
     const fresh = mount.state.cards[mount.state.cards.length - 1];
@@ -818,9 +840,15 @@ function retryCard(doc: Document, mount: PanelMount, cardId: string): void {
     // The retry reuses the original question, including its selection action,
     // so a retried lineage question does not silently become an evidence one.
     request = requestFor(action, fresh.text, { paperId: mount.paperId });
+    // Claim the slot before painting, exactly as run() does: retry() already
+    // set busy: true in the state, but canAsk() reads the flight, not the
+    // state.
+    flight = beginFlight(mount);
   } catch (error) {
     report(error, "reader panel retry");
+    mount.flight = null;
     showMessage(mount, errorMessage(error));
+    syncFormState(mount);
     paintStream(doc, mount);
     return;
   }
@@ -830,7 +858,7 @@ function retryCard(doc: Document, mount: PanelMount, cardId: string): void {
   });
   syncFormState(mount);
   paintStream(doc, mount);
-  dispatch(doc, mount, request);
+  dispatch(doc, mount, request, flight);
 }
 
 /**
