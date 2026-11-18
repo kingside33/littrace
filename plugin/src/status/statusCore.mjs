@@ -290,27 +290,87 @@ export const OLLAMA_KEYS = Object.freeze({
 });
 
 /**
- * Last successful sync timestamp from `GET /api/status`.
- *
- * `kbapp/workflows/status.py` exposes three candidates; prefer the export
- * sync (the last thing the plugin's pages read from), then the update finish,
- * then the index publish. A missing value is null, never "now".
+ * Export-sync states, mirrored from kbapp/workflows/publication.py sync_exports()
+ * (`value = dict(status='running', ...)` → `status='synced'` → `status='failed'`).
+ * Every one of the three refreshes `updated`, so `updated` alone says nothing
+ * about whether the sync succeeded.
  */
-export function lastSyncAt(status) {
+export const SYNC_STATES = Object.freeze({
+  SYNCED: "synced",
+  RUNNING: "running",
+  FAILED: "failed",
+  UNKNOWN: "unknown",
+});
+
+/** Fluent keys for the last-sync row's state text. */
+export const SYNC_KEYS = Object.freeze({
+  synced: "status-diag-sync-synced",
+  running: "status-diag-sync-running",
+  failed: "status-diag-sync-failed",
+  unknown: "status-diag-sync-unknown",
+});
+
+/**
+ * The last sync, as a state + timestamp pair rather than a bare timestamp.
+ *
+ * `kbapp/workflows/publication.py:44-55` writes `export_sync` three times per
+ * run: `running` before the work, then `synced` or `failed` — and all three
+ * carry a fresh `updated`. Reading only `updated` therefore reports a failed
+ * or still-running export as "上次同步 <时刻>" with a green tone, which is the
+ * one reading a user would act on.
+ *
+ * The fallbacks are different fields with different meanings: `update_finished_at`
+ * is only written after a completed update (update.py:174), and
+ * `index_published_at` only on a successful index publish. Both are successes
+ * by construction, so they report `synced`.
+ *
+ * Returns `{ state, at, error }`; `at` is the raw timestamp as the service
+ * reported it (the renderer applies `displayStamp`), or null when nothing has
+ * ever synced.
+ */
+export function lastSync(status) {
+  const empty = { state: SYNC_STATES.UNKNOWN, at: null, error: null };
   if (!status || typeof status !== "object" || Array.isArray(status)) {
-    return null;
+    return empty;
   }
   const sync = status.export_sync;
-  if (sync && typeof sync === "object" && typeof sync.updated === "string" && sync.updated.trim()) {
-    return sync.updated;
+  if (sync && typeof sync === "object" && !Array.isArray(sync)) {
+    const at =
+      typeof sync.updated === "string" && sync.updated.trim() ? sync.updated.trim() : null;
+    if (at) {
+      const state =
+        sync.status === SYNC_STATES.SYNCED
+          ? SYNC_STATES.SYNCED
+          : sync.status === SYNC_STATES.RUNNING
+            ? SYNC_STATES.RUNNING
+            : sync.status === SYNC_STATES.FAILED
+              ? SYNC_STATES.FAILED
+              : SYNC_STATES.UNKNOWN;
+      return {
+        state,
+        at,
+        error: typeof sync.error === "string" && sync.error.trim() ? sync.error.trim() : null,
+      };
+    }
   }
   for (const field of ["update_finished_at", "index_published_at"]) {
     const value = status[field];
     if (typeof value === "string" && value.trim()) {
-      return value;
+      return { state: SYNC_STATES.SYNCED, at: value.trim(), error: null };
     }
   }
-  return null;
+  return empty;
+}
+
+/**
+ * Last-successful-sync timestamp from `GET /api/status`, or null.
+ *
+ * Kept as the narrow "just the instant" view of `lastSync()` for callers that
+ * only want a stamp; the diagnostic row uses `lastSync()` because the state
+ * is what distinguishes a success from a failure.
+ */
+export function lastSyncAt(status) {
+  return lastSync(status).at;
 }
 
 /**
@@ -357,6 +417,11 @@ function row(id, tone, extra) {
  * Every row is present even when the service is offline: the popup's job is
  * to say which checks failed, so a missing row would hide a failure. A row
  * with `tone: "unknown"` means "could not check", never "passed".
+ *
+ * Row fields: `value` is literal output (a version, a port, a timestamp),
+ * `valueKey` is a Fluent key used instead of a value, `noteKey` is an extra
+ * Fluent string appended after the value (the sync state word), and `detail`
+ * is the service's own error text when it supplied one.
  */
 export function diagnosticRows(input = {}) {
   const health = input.health && typeof input.health === "object" ? input.health : null;
@@ -420,12 +485,29 @@ export function diagnosticRows(input = {}) {
       { valueKey: OLLAMA_KEYS[ollama] }),
   );
 
-  // 6. Last sync.
-  const stamp = displayStamp(lastSyncAt(input.status));
-  rows.push(
-    row("last-sync", stamp ? "ok" : "unknown",
-      stamp ? { value: stamp } : { valueKey: "status-diag-never-synced" }),
-  );
+  // 6. Last sync. Only a `synced` export sync is a success: `running` and
+  // `failed` both refresh the stamp, so they must not borrow the green tone.
+  const sync = lastSync(input.status);
+  if (sync.at === null) {
+    rows.push(row("last-sync", "unknown", { valueKey: "status-diag-never-synced" }));
+  } else {
+    const tone =
+      sync.state === SYNC_STATES.SYNCED
+        ? "ok"
+        : sync.state === SYNC_STATES.RUNNING
+          ? "unknown"
+          : "warn";
+    rows.push(
+      row("last-sync", tone, {
+        // The instant is data; the state word is a Fluent string the renderer
+        // appends through noteKey, so the row never carries a raw key as text.
+        value: displayStamp(sync.at),
+        noteKey: SYNC_KEYS[sync.state],
+        // The failure text, when the service supplied one.
+        detail: sync.error,
+      }),
+    );
+  }
 
   return rows;
 }

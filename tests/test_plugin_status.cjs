@@ -218,7 +218,7 @@ test("Ollama reachability is derived from the service, never probed directly", a
 test("the last sync time prefers the most specific timestamp", async () => {
   const core = await loadCore();
   assert.equal(
-    core.lastSyncAt({ export_sync: { updated: "2026-11-18T09:00:00+08:00" } }),
+    core.lastSyncAt({ export_sync: { status: "synced", updated: "2026-11-18T09:00:00+08:00" } }),
     "2026-11-18T09:00:00+08:00",
   );
   assert.equal(core.lastSyncAt({ update_finished_at: "2026-11-17T09:00:00" }), "2026-11-17T09:00:00");
@@ -227,11 +227,91 @@ test("the last sync time prefers the most specific timestamp", async () => {
   for (const empty of [null, undefined, {}, [], "x"]) {
     assert.equal(core.lastSyncAt(empty), null);
   }
+  assert.equal(core.lastSyncAt({}), null);
   // Minute precision, deterministic across platforms.
   assert.equal(core.displayStamp("2026-11-18T09:07:31+08:00"), "2026-11-18 09:07");
   assert.equal(core.displayStamp("2026-11-18 09:07"), "2026-11-18 09:07");
   assert.equal(core.displayStamp("not-a-date"), "not-a-date");
   assert.equal(core.displayStamp(null), null);
+});
+
+test("a failed or running export sync is not reported as a successful sync", async () => {
+  const core = await loadCore();
+  // PR #36 review finding (statusCore.mjs:304): kbapp/workflows/publication.py
+  // sync_exports() writes export_sync three times per run — running, then
+  // synced or failed — and all three refresh `updated`. Reading only the
+  // stamp reported a failed sync as "上次同步 <时刻>" in a green row, and it
+  // never reached the 失败项 list.
+  assert.deepEqual({ ...core.SYNC_STATES }, {
+    SYNCED: "synced",
+    RUNNING: "running",
+    FAILED: "failed",
+    UNKNOWN: "unknown",
+  });
+
+  const synced = core.lastSync({ export_sync: { status: "synced", updated: "2026-11-18T09:00:00" } });
+  assert.deepEqual(synced, { state: "synced", at: "2026-11-18T09:00:00", error: null });
+
+  const failed = core.lastSync({
+    export_sync: { status: "failed", updated: "2026-11-18T09:00:00", error: "exports 目录不可写" },
+  });
+  assert.equal(failed.state, "failed");
+  assert.equal(failed.at, "2026-11-18T09:00:00");
+  assert.equal(failed.error, "exports 目录不可写");
+
+  const running = core.lastSync({ export_sync: { status: "running", updated: "2026-11-18T09:00:00" } });
+  assert.equal(running.state, "running");
+
+  // A stamp without a recognised status is not a success either.
+  const unknown = core.lastSync({ export_sync: { updated: "2026-11-18T09:00:00" } });
+  assert.equal(unknown.state, "unknown");
+
+  // Diagnostic rows: only `synced` is green; failed is warned and listed;
+  // running is "in progress" and is not claimed as ok.
+  const rowsFor = (status) =>
+    Object.fromEntries(
+      core.diagnosticRows({ health: AVAILABLE, baseUrl: BASE, models: null, status }).map((row) => [
+        row.id,
+        row,
+      ]),
+    );
+
+  const okRows = rowsFor({ export_sync: { status: "synced", updated: "2026-11-18T09:00:00" } });
+  assert.equal(okRows["last-sync"].tone, "ok");
+  assert.equal(okRows["last-sync"].value, "2026-11-18 09:00");
+  assert.equal(okRows["last-sync"].noteKey, "status-diag-sync-synced");
+  assert.equal(
+    core.failedRows(Object.values(okRows)).some((row) => row.id === "last-sync"),
+    false,
+  );
+
+  const failedRows = rowsFor({
+    export_sync: { status: "failed", updated: "2026-11-18T09:00:00", error: "exports 目录不可写" },
+  });
+  assert.equal(failedRows["last-sync"].tone, "warn", "a failed sync must not be green");
+  assert.equal(failedRows["last-sync"].noteKey, "status-diag-sync-failed");
+  assert.equal(failedRows["last-sync"].detail, "exports 目录不可写");
+  assert.equal(failedRows["last-sync"].value, "2026-11-18 09:00", "the failure instant is still shown");
+  assert.ok(
+    core.failedRows(Object.values(failedRows)).some((row) => row.id === "last-sync"),
+    "a failed sync belongs in 失败项",
+  );
+
+  const runningRows = rowsFor({ export_sync: { status: "running", updated: "2026-11-18T09:00:00" } });
+  assert.equal(runningRows["last-sync"].tone, "unknown", "in-progress is not success");
+
+  // Every row still renders something and every noteKey has a bundle entry.
+  for (const rows of [okRows, failedRows, runningRows]) {
+    for (const row of Object.values(rows)) {
+      assert.ok(row.value !== null || row.valueKey !== null, `${row.id} must render something`);
+    }
+  }
+  const en = parseFtl("en-US");
+  const zh = parseFtl("zh-CN");
+  for (const key of Object.values(core.SYNC_KEYS)) {
+    assert.ok(en.has(key), `en-US is missing ${key}`);
+    assert.ok(zh.has(key), `zh-CN is missing ${key}`);
+  }
 });
 
 test("diagnostic rows cover the four required facts and fail closed", async () => {
@@ -242,7 +322,7 @@ test("diagnostic rows cover the four required facts and fail closed", async () =
     // The service's own model report: installed is null only when it could
     // not reach Ollama.
     models: { items: [{ installed: true }] },
-    status: { export_sync: { updated: "2026-11-18T09:00:00+08:00" } },
+    status: { export_sync: { status: "synced", updated: "2026-11-18T09:00:00+08:00" } },
   });
   assert.deepEqual(
     healthy.map((row) => row.id),

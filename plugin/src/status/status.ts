@@ -332,7 +332,12 @@ export function createStatusDot(win: Window): StatusDot {
     const node = html(doc, "littrace-status-panel-row");
     node.setAttribute("data-tone", row.tone);
     const value = row.value ?? (row.valueKey ? t(row.valueKey) : "");
-    node.textContent = `${t(row.labelKey)}: ${value}`;
+    // The state word (e.g. a sync's 「失败」) and the service's own error text
+    // both hang off the row instead of replacing its value: the instant and
+    // the reason must be visible together.
+    const note = row.noteKey ? ` · ${t(row.noteKey)}` : "";
+    const detail = row.detail ? ` — ${row.detail}` : "";
+    node.textContent = `${t(row.labelKey)}: ${value}${note}${detail}`;
     return node;
   }
 

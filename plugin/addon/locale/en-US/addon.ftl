@@ -151,3 +151,7 @@ status-diag-never-synced = never
 status-diag-unavailable = unavailable
 status-diag-refresh = Refresh
 status-diag-failures = Failed checks
+status-diag-sync-synced = synced
+status-diag-sync-running = in progress
+status-diag-sync-failed = failed
+status-diag-sync-unknown = state unknown

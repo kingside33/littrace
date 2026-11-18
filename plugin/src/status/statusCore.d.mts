@@ -36,6 +36,10 @@ export type DiagnosticRow = {
   tone: "ok" | "warn" | "bad" | "unknown";
   value: string | null;
   valueKey: string | null;
+  /** Extra Fluent string appended after the value (e.g. a sync state word). */
+  noteKey?: string | null;
+  /** The service's own error text for this check, when it supplied one. */
+  detail?: string | null;
 };
 
 export type DiagnosticInput = {
@@ -73,6 +77,13 @@ export const OLLAMA_STATES: Readonly<{
   UNKNOWN: "unknown";
 }>;
 export const OLLAMA_KEYS: Readonly<Record<string, string>>;
+export const SYNC_STATES: Readonly<{
+  SYNCED: "synced";
+  RUNNING: "running";
+  FAILED: "failed";
+  UNKNOWN: "unknown";
+}>;
+export const SYNC_KEYS: Readonly<Record<string, string>>;
 
 export const DIAGNOSTIC_ROWS: ReadonlyArray<Readonly<{ id: string; labelKey: string }>>;
 
@@ -104,6 +115,11 @@ export function versionRelation(
 ): VersionRelation;
 export function portOf(baseUrl?: string): number | null;
 export function ollamaState(models: unknown): "reachable" | "unreachable" | "unknown";
+export function lastSync(status: unknown): {
+  state: "synced" | "running" | "failed" | "unknown";
+  at: string | null;
+  error: string | null;
+};
 export function lastSyncAt(status: unknown): string | null;
 export function displayStamp(value: unknown): string | null;
 export function diagnosticRows(input?: DiagnosticInput): DiagnosticRow[];

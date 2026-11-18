@@ -148,3 +148,7 @@ status-diag-never-synced = 从未
 status-diag-unavailable = 不可用
 status-diag-refresh = 刷新
 status-diag-failures = 失败项
+status-diag-sync-synced = 已完成
+status-diag-sync-running = 进行中
+status-diag-sync-failed = 失败
+status-diag-sync-unknown = 状态未知
