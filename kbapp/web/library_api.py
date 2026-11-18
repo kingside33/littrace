@@ -6,8 +6,14 @@ from fastapi import HTTPException
 from fastapi.responses import FileResponse
 from kbapp.workflows.notes import publish_notes
 
-def paper_view(store, paper):
-    """H01/H02：文献详情载荷，v1 与 v2 共用同一实现。"""
+def paper_view(store, paper, refresh_references=True):
+    """H01/H02：文献详情载荷，v1 与 v2 共用同一实现。
+
+    ``refresh_references`` 决定 ``references.view`` 是否触发后台抓取队列。
+    v1 ``GET /api/paper`` 保持既有契约（详情页打开即排队补全参考文献）；
+    条目列这类纯展示调用方必须传 ``False``，否则浏览条目就会为每篇文献
+    排队一次外部抓取（见 tests/test_api_v2.py 的只读用例）。
+    """
     pid = store.resolve(paper)
     p = store.papers().get(pid)
     if not p:
@@ -20,7 +26,7 @@ def paper_view(store, paper):
     if understanding and understanding['input_fingerprint'] != understanding_fingerprint(store, p):
         understanding = dict(understanding, verification_status='stale', coverage=dict(understanding['coverage'], complete=False), gaps=understanding.get('gaps', []) + ['PDF、模型或提示版本已变化，需重新理解'])
     from kbapp.workflows.references import view, citation_info
-    return {'paper': dict(p, **citation_info(p)), 'relations': rel, 'approvals': [a for a in store.approvals() if a['paper_id'] == pid], 'understanding': understanding, 'note_sync': note_status(store, p), 'references': view(store, pid)}
+    return {'paper': dict(p, **citation_info(p)), 'relations': rel, 'approvals': [a for a in store.approvals() if a['paper_id'] == pid], 'understanding': understanding, 'note_sync': note_status(store, p), 'references': view(store, pid, auto=refresh_references)}
 
 def install(app, context, token):
     store = context.store

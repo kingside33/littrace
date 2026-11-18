@@ -669,6 +669,28 @@ test("the column is wired through the plugin's single registration entry", () =>
   const shutdown = hooks.slice(hooks.indexOf("function onShutdown("));
   assert.match(shutdown, /unregisterAll\(\)/, "disable/uninstall still reclaims the columns");
   assert.match(shutdown, /resetPaperData\(\)/, "shutdown drops the per-paper cache");
+
+  const paperData = fs.readFileSync(
+    path.join(PLUGIN_DIR, "src", "columns", "paperData.ts"),
+    "utf8",
+  );
+  // Finding 1 (PR #29): the column must read the read-only v2 endpoint and the
+  // request queue must be bounded.
+  assert.match(
+    paperData,
+    /maxConcurrentRequests/,
+    "the column passes a concurrency cap to the provider factory",
+  );
+  const dataCore = fs.readFileSync(
+    path.join(PLUGIN_DIR, "src", "columns", "columnDataCore.mjs"),
+    "utf8",
+  );
+  assert.match(
+    dataCore,
+    /DEFAULT_MAX_CONCURRENT_REQUESTS = \d+/,
+    "the cap is a named constant, not a magic number",
+  );
+  assert.match(dataCore, /PAPER_ENDPOINT = "\/api\/v2\/paper"/, "reads the v2 endpoint");
   assert.ok(
     shutdown.indexOf("unregisterAll()") < shutdown.indexOf("resetPaperData()"),
     "the columns are unregistered before their cache is dropped",
@@ -730,6 +752,22 @@ function paperResponse(overrides = {}) {
 /** Let queued microtasks run so an in-flight fetch can settle. */
 function flush() {
   return new Promise((resolve) => setImmediate(resolve));
+}
+
+/** Let one macrotask (and its microtasks) run; for fetches awaiting a timer. */
+function tick() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** Wait until `condition` holds or `rounds` macrotasks have passed. */
+async function until(condition, rounds = 200) {
+  for (let index = 0; index < rounds; index += 1) {
+    if (condition()) {
+      return true;
+    }
+    await tick();
+  }
+  return condition();
 }
 
 /** A fetchPaper stand-in that records calls and resolves/rejects on demand. */
@@ -981,6 +1019,101 @@ test("one request per paper: hits are served from cache, misses are deduped", as
     assert.equal(providers.readingProvider(ref, "reading"), "");
   }
   assert.equal(fetcher.calls.length, 2, "non-item rows must not hit the service");
+});
+
+test("a sort click cannot flood the single-process service with requests", async () => {
+  const data = await loadDataCore();
+  // One click on a column header re-reads every row: itemTree.jsx
+  // `_handleColumnSort` -> `sort()` -> `rowProvider.sort()`, and
+  // `_initSortState` drops `_sortCache`, so each row misses exactly once.
+  // Without a cap this opens one request per library item at once.
+  let inFlight = 0;
+  let peak = 0;
+  let issued = 0;
+  const providers = data.createPaperDataProviders({
+    maxConcurrentRequests: 4,
+    fetchPaper: async () => {
+      issued += 1;
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      // Resolve on a later tick so arrivals really overlap.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      inFlight -= 1;
+      return paperResponse({ relations: [relation("confirmed")] });
+    },
+  });
+
+  // 40 rows, as a sort would touch them.
+  for (let index = 0; index < 40; index += 1) {
+    providers.lineageProvider(item(`ROW${index}`), "lineage");
+  }
+  assert.equal(issued, 4, "only the concurrency limit is issued immediately");
+  assert.equal(peak, 4, "never more than the cap in flight at once");
+
+  // The queued remainder drains on its own, still within the cap. Wait for
+  // the last answer to *settle*, not merely to be issued.
+  const drained = await until(
+    () => issued === 40 && providers.cache.read("z:1:ROW39") !== undefined,
+  );
+  assert.ok(drained, `every queued paper is eventually requested, got ${issued}`);
+  assert.equal(issued, 40);
+  assert.ok(peak <= 4, `peak concurrency ${peak} must stay within the cap`);
+
+  // And every one of them landed in the cache.
+  for (let index = 0; index < 40; index += 1) {
+    assert.equal(
+      providers.lineageProvider(item(`ROW${index}`), "lineage"),
+      "1 已确认 · 0 待核 · 0 缺口",
+      `row ${index} must be filled after the queue drains`,
+    );
+  }
+});
+
+test("queueing dedupes repeated rows and skips papers filled while waiting", async () => {
+  const data = await loadDataCore();
+  const requested = [];
+  const providers = data.createPaperDataProviders({
+    maxConcurrentRequests: 1,
+    fetchPaper: async (paper) => {
+      requested.push(paper);
+      await flush();
+      return paperResponse({ relations: [relation("confirmed")] });
+    },
+  });
+
+  // Same paper asked for repeatedly in one tick, before anything settles.
+  for (let index = 0; index < 5; index += 1) {
+    providers.lineageProvider(item("SAME0001"), "lineage");
+  }
+  // A second paper queued behind the first.
+  providers.lineageProvider(item("SAME0002"), "lineage");
+  assert.equal(requested.length, 1, "only one request starts under a cap of 1");
+
+  await until(() => requested.length === 2);
+  assert.deepEqual(requested, ["z:1:SAME0001", "z:1:SAME0002"], "each paper exactly once");
+});
+
+test("a queued paper that another request already filled is not fetched again", async () => {
+  const data = await loadDataCore();
+  let issued = 0;
+  const providers = data.createPaperDataProviders({
+    maxConcurrentRequests: 1,
+    fetchPaper: async () => {
+      issued += 1;
+      await flush();
+      return paperResponse({ relations: [relation("confirmed")] });
+    },
+  });
+
+  providers.lineageProvider(item("QUEUE001"), "lineage");
+  providers.lineageProvider(item("QUEUE002"), "lineage");
+  // While QUEUE002 waits, its value is filled out from under the queue.
+  providers.cache.store("z:1:QUEUE002", paperResponse({ relations: [relation("confirmed")] }));
+  await until(() => providers.cache.read("z:1:QUEUE001") !== undefined);
+  await tick();
+  await tick();
+  assert.equal(issued, 1, "the already-filled paper is skipped, not re-requested");
+  assert.equal(providers.lineageProvider(item("QUEUE002"), "lineage"), "1 已确认 · 0 待核 · 0 缺口");
 });
 
 test("an update hook fires once per successful answer, never on failure", async () => {

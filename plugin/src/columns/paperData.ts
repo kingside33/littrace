@@ -1,4 +1,8 @@
-import { createPaperDataProviders, paperPath } from "./columnDataCore.mjs";
+import {
+  createPaperDataProviders,
+  DEFAULT_MAX_CONCURRENT_REQUESTS,
+  paperPath,
+} from "./columnDataCore.mjs";
 import type { PaperDataProviders } from "./columnDataCore.mjs";
 import { serviceClient } from "../service-client";
 
@@ -29,13 +33,12 @@ let providers: PaperDataProviders | null = null;
 let repaintTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
- * Ask every open main window to redraw its item tree, once per burst.
+ * Repaint every open main window's item tree, once per burst.
  *
  * Wrapped in typeof checks and try/catch on purpose: a repaint is an
  * optimisation, and a Zotero build without one of these entry points must
  * degrade to "the column updates on the next natural repaint", never to an
- * exception thrown out of a dataProvider. The exact itemsView method is part
- * of the 真机 acceptance list (issue #27) — it is not exercised by unit tests.
+ * exception thrown out of a dataProvider.
  */
 function scheduleRepaint(): void {
   if (repaintTimer !== null) {
@@ -79,6 +82,9 @@ export function paperData(): PaperDataProviders {
         }
         return serviceClient().get(path);
       },
+      // Explicit, not the default: one sort click re-reads every row, and the
+      // local service is a single process. See DEFAULT_MAX_CONCURRENT_REQUESTS.
+      maxConcurrentRequests: DEFAULT_MAX_CONCURRENT_REQUESTS,
       onUpdate: () => scheduleRepaint(),
     });
   }

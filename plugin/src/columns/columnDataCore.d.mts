@@ -53,6 +53,8 @@ export interface PaperDataProvidersOptions {
   fetchPaper: (paper: string, context: { libraryID: number; itemKey: string }) => Promise<any>;
   cache?: PaperCache;
   cacheOptions?: PaperCacheOptions;
+  /** At most this many requests in flight; defaults to DEFAULT_MAX_CONCURRENT_REQUESTS. */
+  maxConcurrentRequests?: number;
   onUpdate?: (key: string) => void;
 }
 
@@ -70,6 +72,7 @@ export declare const PAPER_CACHE_DEFAULTS: {
   failureTtlMs: number;
   maxEntries: number;
 };
+export declare const DEFAULT_MAX_CONCURRENT_REQUESTS: number;
 export declare const READING_STATES: readonly ReadingState[];
 
 export declare function paperKeyOf(libraryID: unknown, itemKey: unknown): string;

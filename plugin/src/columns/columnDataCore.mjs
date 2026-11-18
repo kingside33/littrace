@@ -57,6 +57,17 @@ export const PAPER_CACHE_DEFAULTS = Object.freeze({
   maxEntries: 500,
 });
 
+/**
+ * At most this many `GET /api/v2/paper` requests are in flight at once.
+ *
+ * The service is a single-process uvicorn (kbapp/workflows/cli.py); its request
+ * discipline gives each call a 10 s timeout. A sort click re-reads every row,
+ * so an uncapped column would open one request per library item at once and
+ * push unrelated endpoints into timeout. Six keeps a page filling quickly
+ * while leaving the service responsive.
+ */
+export const DEFAULT_MAX_CONCURRENT_REQUESTS = 6;
+
 /** 「精读」 states; `unknown` is not a state but the absence of an answer. */
 export const READING_STATES = Object.freeze(["complete", "partial", "none"]);
 
@@ -387,38 +398,80 @@ export function createPaperDataProviders(options = {}) {
   }
   const cache = options.cache || createPaperCache(options.cacheOptions || {});
   const onUpdate = typeof options.onUpdate === "function" ? options.onUpdate : null;
+  const maxConcurrentRequests = Number.isFinite(options.maxConcurrentRequests)
+    ? Math.max(1, Math.trunc(options.maxConcurrentRequests))
+    : DEFAULT_MAX_CONCURRENT_REQUESTS;
 
-  /** Schedule one request for `key` unless a fresh value or request exists. */
-  function ensure(key, libraryID, itemKey) {
-    if (cache.read(key) || cache.inFlight(key)) {
-      return;
+  // Requests are issued through a small queue rather than straight from the
+  // dataProvider. One click on a column header re-reads every row (itemTree.jsx
+  // `_handleColumnSort` -> `sort()` -> `rowProvider.sort()`, and `_initSortState`
+  // drops `_sortCache`), so without a cap a 2000-item library would open 2000
+  // sockets against the single-process local service at once and starve every
+  // other endpoint on it. The cap bounds damage to the service, not the column:
+  // queued papers fill in over the next few seconds and each success repaints.
+  let activeRequests = 0;
+  const queue = [];
+
+  function pump() {
+    while (activeRequests < maxConcurrentRequests && queue.length > 0) {
+      const next = queue.shift();
+      // A key may have been filled (or failed) while it waited in the queue.
+      if (cache.read(next.key)) {
+        next.resolve(null);
+        continue;
+      }
+      start(next);
     }
+  }
+
+  function start({ key, libraryID, itemKey, resolve }) {
+    activeRequests += 1;
     let request;
     try {
       request = Promise.resolve(fetchPaper(key, { libraryID, itemKey }));
     } catch (error) {
       request = Promise.reject(error);
     }
+    const settled = request.then(
+      (data) => {
+        cache.store(key, data);
+        if (onUpdate) {
+          try {
+            onUpdate(key);
+          } catch {
+            // A repaint hook must not turn a good response into a failure.
+          }
+        }
+        return data;
+      },
+      () => {
+        cache.storeFailure(key);
+        return null;
+      },
+    );
     cache.track(
       key,
-      request.then(
-        (data) => {
-          cache.store(key, data);
-          if (onUpdate) {
-            try {
-              onUpdate(key);
-            } catch {
-              // A repaint hook must not turn a good response into a failure.
-            }
-          }
-          return data;
-        },
-        () => {
-          cache.storeFailure(key);
-          return null;
-        },
-      ),
+      settled.then((value) => {
+        activeRequests -= 1;
+        resolve(value);
+        pump();
+        return value;
+      }),
     );
+  }
+
+  /** Schedule one request for `key` unless a fresh value or request exists. */
+  function ensure(key, libraryID, itemKey) {
+    if (cache.read(key) || cache.inFlight(key)) {
+      return;
+    }
+    // Register the queued slot synchronously so a second caller in the same
+    // tick joins it instead of queueing the same paper twice.
+    const queued = new Promise((resolve) => {
+      queue.push({ key, libraryID, itemKey, resolve });
+    });
+    cache.track(key, queued);
+    pump();
   }
 
   /** `{key, libraryID, itemKey}` for a real item row, or null. */
