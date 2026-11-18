@@ -1,6 +1,11 @@
 import { config } from "../package.json";
 import { initLocale } from "./utils/locale";
-import { registerAll, unregisterAll, unregisterWindow } from "./registry";
+import {
+  registerAll,
+  registerWindowIndependent,
+  unregisterAll,
+  unregisterWindow,
+} from "./registry";
 
 /**
  * Lifecycle dispatcher. bootstrap.js forwards the Zotero bootstrap hooks
@@ -16,6 +21,12 @@ async function onStartup() {
   ]);
 
   initLocale();
+
+  // Window-independent registrations (notifiers, deep-link bridges, reader
+  // events) run exactly once. Registering them per main window would double
+  // every selection-popup button, because Zotero.Reader's listeners are
+  // global rather than per-window.
+  registerWindowIndependent();
 
   // Run the window-level registration for windows that already exist, so a
   // plugin loaded after startup registers on every open main window.
