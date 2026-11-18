@@ -516,12 +516,26 @@ function mountFor(
  * Rebind a mount to the current item, dropping the previous item's paint.
  *
  * `onItemChange` must not render (itemPaneManager.js:477-483: "Update data ...
- * Don't render/refresh UI"), so this only rebinds; `onRender` — which Zotero
- * calls right after — does the painting. Dropping the rows here also means a
- * switched item can never inherit the previous one's DOM, even for one frame.
+ * Don't render/refresh UI"), so this only rebinds; `onRender` paints.
+ *
+ * **Only a real change clears.** Zotero's `set item` calls `_handleItemChange`
+ * on *every* assignment, even when the item is unchanged
+ * (itemPaneSectionElementBase.mjs:31-34), while `render()` returns early when
+ * its `[tabID, item.id]` dependencies did not change (same file:133-155). A
+ * same-item repaint — reordering a section in the sidenav
+ * (itemDetails.js:474-492 → `await this.render()`), or another plugin
+ * registering a section and triggering an `itempane` refresh — therefore runs
+ * `onItemChange` but *skips* `onRender`. Clearing unconditionally left all
+ * three sections blank in exactly those cases. Since a real item change does
+ * change `item.id`, `onRender` is guaranteed to run then, so the old rows are
+ * dropped at paint time anyway.
  */
 function bindItem(mount: SectionMount, item?: any): void {
-  mount.cacheKey = cacheKeyFor(item);
+  const key = cacheKeyFor(item);
+  if (mount.cacheKey === key) {
+    return;
+  }
+  mount.cacheKey = key;
   mount.state = idleState();
   mount.body.replaceChildren();
 }

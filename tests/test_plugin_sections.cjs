@@ -675,17 +675,34 @@ test("onRender is the only paint path; onItemChange only rebinds", () => {
   assert.match(source, /onRender\(\{ doc, body, item \}/);
   assert.match(source, /onItemChange\(/);
   // The official hook contract: onItemChange updates data and setEnabled but
-  // must not render. So it rebinds and clears, and the paint happens in
-  // onRender — which also means a switched item never momentarily shows the
-  // previous item's rows.
+  // must not render. The paint happens in onRender.
   const bind = functionBody(source, "bindItem");
   assert.ok(!bind.includes("paintSection"), "onItemChange must not paint");
-  assert.match(bind, /replaceChildren\(\)/, "a rebind clears the previous item's DOM");
   // onRender is an object-literal method, so slice it to the next hook.
   const renderStart = source.indexOf("onRender({ doc, body, item }");
   assert.ok(renderStart > 0, "onRender must be registered");
   const onRender = source.slice(renderStart, source.indexOf("},\n    ICON_BASE", renderStart));
   assert.match(onRender, /void paintSection\(mount, sectionID\)/);
+});
+
+test("a same-item repaint does not clear the DOM (sidenav reorder leaves it blank)", () => {
+  const source = fs.readFileSync(SECTIONS_TS, "utf8");
+  const bind = functionBody(source, "bindItem");
+  // Zotero's `set item` calls _handleItemChange on every assignment, but
+  // render() returns early when [tabID, item.id] are unchanged
+  // (itemPaneSectionElementBase.mjs:31-34, 133-155). Reordering a section
+  // (itemDetails.js:474-492 → render()) therefore runs onItemChange but skips
+  // onRender; an unconditional replaceChildren() left all three sections blank.
+  assert.match(bind, /if \(mount\.cacheKey === key\)/, "an unchanged key must short-circuit");
+  const guard = bind.slice(bind.indexOf("if (mount.cacheKey === key)"), bind.indexOf("mount.cacheKey = key;"));
+  assert.match(guard, /return;/, "the unchanged-key branch returns before clearing");
+  assert.ok(
+    guard.indexOf("return") < bind.indexOf("replaceChildren()"),
+    "replaceChildren must sit after the unchanged-key guard",
+  );
+  // A real change still clears, and onRender then paints (item.id changed, so
+  // the render dependencies changed with it).
+  assert.match(bind, /mount\.body\.replaceChildren\(\)/);
 });
 
 test("the async fill guards on both the cache key and the render generation", () => {
