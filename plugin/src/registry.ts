@@ -1,6 +1,7 @@
 import { createRegistry } from "./registryCore.mjs";
 import { registerReaderEvents } from "./readerPanel";
 import { createLineageColumn } from "./columns/lineage";
+import { createTabHost } from "./tabs/tabs";
 
 /**
  * The single registration entry of the plugin.
@@ -66,6 +67,14 @@ export async function registerAll(win: Window): Promise<void> {
   if (!registry.claimWindow(win)) {
     return;
   }
+  // Four iframe function tabs plus the host bridge (U4). Window-scoped: the
+  // iframes live in this window's tab deck, the lineage-locate listener
+  // listens on this window, and closing the window reclaims every node,
+  // listener and timer through the tab host's cleanup table.
+  const tabHost = createTabHost(win);
+  register(win, "iframe-tabs", () => {
+    tabHost.dispose();
+  });
   // Future features hook in here; each keeps its own
   // `register(win, id, dispose)`. Reader events and the item-tree column are
   // NOT registered here: see registerWindowIndependent() below.
