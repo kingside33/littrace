@@ -1175,9 +1175,17 @@ function identityOfReader(reader: unknown): {
     return empty;
   }
   const itemKey = typeof item.key === "string" ? item.key.trim() : "";
-  const libraryId = Number.isInteger(Number(item.libraryID))
-    ? Math.trunc(Number(item.libraryID))
-    : null;
+  // Positive integer only. `Number(null) === 0` and `Number.isInteger(0)` is
+  // true, so a bare isInteger check would turn an unknown library into library
+  // 0 and let paperKeyOf build the non-existent id `z:0:KEY` (ADR 0028).
+  const rawLibrary = Number(item.libraryID);
+  const libraryId =
+    item.libraryID !== null &&
+    item.libraryID !== undefined &&
+    Number.isInteger(rawLibrary) &&
+    rawLibrary > 0
+      ? rawLibrary
+      : null;
   const parentKey =
     typeof item.parentItemKey === "string"
       ? item.parentItemKey.trim()
@@ -1188,9 +1196,9 @@ function identityOfReader(reader: unknown): {
     itemKey,
     libraryId,
     parentKey,
-    // A parent in a different library is not expressible through this API;
-    // the service's default (1) applies, which is also what `identity()`
-    // assumes for older records.
+    // A parent in a different library is not expressible through this API, so
+    // the parent inherits this item's library — which the service's identity()
+    // also assumes for a paper and its attachment.
     parentLibraryId: parentKey ? libraryId : null,
   };
 }

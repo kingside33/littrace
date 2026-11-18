@@ -1264,6 +1264,38 @@ test("the attachment key names the paper, and a missing key names nothing", asyn
   assert.equal(mod.paperKeyOf(null), "");
 });
 
+test("an unknown library is refused, never guessed (ADR 0028)", async () => {
+  const mod = await core();
+
+  // `Number(null) === 0` and `Number.isInteger(0)` is true: the naive check
+  // produced the non-existent id `z:0:X`, which the service cannot resolve.
+  assert.equal(mod.paperKeyOf({ itemKey: "X", libraryId: null }), "");
+  assert.equal(mod.paperKeyOf({ itemKey: "X", libraryId: 0 }), "", "library 0 is not a library");
+  assert.equal(mod.paperKeyOf({ itemKey: "X", libraryId: -1 }), "");
+  assert.equal(mod.paperKeyOf({ itemKey: "X", libraryId: "abc" }), "");
+  assert.equal(
+    mod.paperKeyOf({ itemKey: "X" }),
+    "",
+    "a missing library must not silently become library 1",
+  );
+  assert.equal(
+    mod.paperKeyOf({ itemKey: "ATT", libraryId: 2, parentKey: "P", parentLibraryId: null }),
+    "z:2:P",
+    "a parent inherits the item's library",
+  );
+  assert.equal(
+    mod.paperKeyOf({ itemKey: "ATT", libraryId: 2, parentKey: "P", parentLibraryId: 0 }),
+    "",
+    "a parent library of 0 is not a library either",
+  );
+
+  // The end-to-end consequence: an unknown library makes lineage refuse with a
+  // visible reason instead of querying an id that cannot exist.
+  const blocked = mod.lineageRequest(mod.paperKeyOf({ itemKey: "X", libraryId: null }));
+  assert.equal(blocked.kind, "blocked");
+  assert.match(blocked.message, /无法识别当前文献/);
+});
+
 test("the settings action targets the workbench settings page", async () => {
   const mod = await core();
   assert.equal(mod.settingsUrl("http://127.0.0.1:8765"), "http://127.0.0.1:8765/#settings");

@@ -1305,8 +1305,14 @@ export function settingsUrl(baseUrl) {
  * 当前 PDF 的文献标识 `z:<libraryID>:<itemKey>`。
  *
  * 与 kbapp/library/sources.py:34-40 的 identity 同一口径：优先用父条目
- * （PDF 附件挂在论文条目下），独立 PDF 退回附件自身；条目 key 缺失时返回空串，
- * 面板随后按「无法识别当前文献」处理，而不是拿空 key 去查询。
+ * （PDF 附件挂在论文条目下），独立 PDF 退回附件自身。
+ *
+ * 库号必须是**正整数**才拼得出来。缺 key、或库号不是正整数（`null`、0、
+ * 负数、NaN）一律返回空串，由调用方给「无法识别当前文献」——绝不猜库号：
+ * ADR 0028 否决过「缺失时默认 1」，因为群组库下会静默定位到另一篇文献，
+ * 而 `z:0:X` 更是服务端根本不存在的 id（会表现为「这篇文献还没有进入方法
+ * 谱系」这种听起来像已确认事实的误报）。`Number(null) === 0` 是本函数
+ * 最容易踩的坑，所以判断写成 `Number.isInteger && > 0` 而不是 `>= 0`。
  */
 export function paperKeyOf(identity) {
   const record = recordOf(identity);
@@ -1316,7 +1322,13 @@ export function paperKeyOf(identity) {
     return "";
   }
   const raw = parentKey ? (record.parentLibraryId ?? record.libraryId) : record.libraryId;
-  const libraryID = Number.isInteger(Number(raw)) && Number(raw) >= 0 ? Math.trunc(Number(raw)) : 1;
+  if (raw === null || raw === undefined || raw === "") {
+    return "";
+  }
+  const libraryID = Number(raw);
+  if (!Number.isInteger(libraryID) || libraryID <= 0) {
+    return "";
+  }
   return `z:${libraryID}:${key}`;
 }
 
