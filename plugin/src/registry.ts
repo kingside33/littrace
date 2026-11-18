@@ -3,6 +3,7 @@ import { registerReaderEvents } from "./readerPanel";
 import { createLineageColumn } from "./columns/lineage";
 import { createTabHost } from "./tabs/tabs";
 import { createItemSections, disposeItemSections } from "./itemSections";
+import { createReadingColumn } from "./columns/reading";
 
 /**
  * The single registration entry of the plugin.
@@ -100,12 +101,20 @@ export function registerWindowIndependent(): void {
   // The disposer unregisters both handlers and closes any panel it opened,
   // so a disabled plugin leaves no listener or DOM behind in an open reader.
   registerGlobal("reader-panel", registerReaderEvents());
-  // 「谱系」item-tree column (A2). Registered only when Zotero accepted the
-  // option; a rejection is already logged and must not abort startup.
+  // The two item-tree columns (U1): 「谱系」 from relation counts and 「精读」
+  // from reading coverage, both read from one shared service cache. Each is
+  // registered only when Zotero accepted its option; a rejection is already
+  // logged and must not abort startup or the other column.
   const lineage = createLineageColumn();
   if (lineage.dataKey) {
     registerGlobal("item-column:lineage", () => {
       lineage.dispose();
+    });
+  }
+  const reading = createReadingColumn();
+  if (reading.dataKey) {
+    registerGlobal("item-column:reading", () => {
+      reading.dispose();
     });
   }
   // 条目面板三 section(U2): 证据 / 谱系关系 / 精读. Process-wide like the

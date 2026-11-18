@@ -96,6 +96,39 @@ class ApiV2(unittest.TestCase):
         self.assertEqual(paper.json()['paper']['title'], 'Paper 1')
         self.assertEqual(client.get('/api/v2/paper', params={'paper': 'missing'}).status_code, 404)
 
+    def test_paper_v2_is_read_only_unless_refresh_is_requested(self):
+        """条目列按行读取本接口；默认不得创建抓取任务。
+
+        `paper_view` 经 `references.view` 在 `auto=True` 时执行
+        `enqueue()`：写入 reference_jobs，worker 随后发起外部 OpenAlex
+        请求并回写服务库。v1 `GET /api/paper` 保留该行为（详情页打开即补全
+        参考文献，tests/test_references.py 有既有断言），v2 必须默认关闭，
+        否则浏览（或排序）一次列表就会为整库排队外部抓取。
+        """
+        def jobs():
+            with self.store.db() as db:
+                return db.execute('SELECT paper_id, status FROM reference_jobs').fetchall()
+
+        client = self.client()
+        before = jobs()
+        body = client.get('/api/v2/paper', params={'paper': 'p1'})
+        self.assertEqual(body.status_code, 200)
+        self.assertEqual(jobs(), before, 'default v2 read must not queue reference jobs')
+        # 只读取数仍然给全字段，列需要的 relations / understanding 都在。
+        payload = body.json()
+        self.assertIn('relations', payload)
+        self.assertIn('understanding', payload)
+        self.assertIn('references', payload)
+        self.assertEqual(payload['references']['job']['status'], 'cached')
+
+        # 显式 opt-in 才恢复 v1 的排队行为。
+        opted = client.get('/api/v2/paper', params={'paper': 'p1', 'refresh_references': 'true'})
+        self.assertEqual(opted.status_code, 200)
+        self.assertEqual(
+            [row['status'] for row in jobs()], ['queued'],
+            'refresh_references=true still queues, so the v1 workflow stays reachable',
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -51,10 +51,18 @@ def install(app, context, token):
         return dashboard(store, task_id, after_event_id, limit)
 
     @app.get('/api/v2/paper', response_model=PaperResponse)
-    def paper_v2(paper: str):
+    def paper_v2(paper: str, refresh_references: bool = False):
+        """文献详情；默认只读。
+
+        `refresh_references=true` 显式恢复 v1 的「打开即排队补全参考文献」行为。
+        默认 False 是本接口与 v1 的唯一语义差异：条目列会按行读取本接口，
+        若默认排队，浏览列表就会为每篇文献创建 reference_jobs 记录，并由
+        worker 发起外部 OpenAlex 请求、回写服务库 —— 对一个声明为只读的
+        展示路径不成立（见 tests/test_api_v2.py 的只读用例）。
+        """
         from kbapp.web.library_api import paper_view
         try:
-            return paper_view(store, paper)
+            return paper_view(store, paper, refresh_references=refresh_references)
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from None
 

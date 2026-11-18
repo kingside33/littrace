@@ -33,6 +33,10 @@ export interface LineageLocatePayload {
   itemKey: string;
   libraryID: number | null;
   state: LineageBadgeState;
+  /** Tab id to open (U4 owns the tab). */
+  tab: string;
+  /** `z:<libraryID>:<key>` for `?paper=`; null when unknown. */
+  paper: string | null;
 }
 
 export interface LineageColumnOption {
@@ -65,7 +69,8 @@ export interface LineageColumnHooks {
 export declare const LINEAGE_STATES: readonly LineageBadgeState[];
 export declare const LINEAGE_LOCATE_EVENT: string;
 export declare const LINEAGE_COLUMN_DATA_KEY: string;
-export declare const fakeLineageDataProvider: DataProvider;
+export declare const READING_COLUMN_DATA_KEY: string;
+export declare const LINEAGE_TAB_ID: string;
 
 export declare function toCount(value: unknown): number;
 export declare function normalizeCounts(record: unknown): LineageCounts;
@@ -87,9 +92,14 @@ export declare function itemRefOf(
   index: unknown,
   doc?: unknown,
 ): unknown;
-export declare function stableHash(text: unknown): number;
-export declare function fakeLineageFor(key: unknown): LineageCounts;
+export declare function columnOption(
+  pluginID: unknown,
+  dataKey: string,
+  label: string,
+  extra?: Partial<LineageColumnOption>,
+): LineageColumnOption;
 export declare function lineageColumnOption(pluginID: unknown): LineageColumnOption;
+export declare function readingColumnOption(pluginID: unknown): LineageColumnOption;
 export declare function createColumnRegistration(
   manager: {
     registerColumn(option: unknown): unknown;
@@ -97,11 +107,14 @@ export declare function createColumnRegistration(
   },
   pluginID: unknown,
   hooks?: LineageColumnHooks,
+  option?: LineageColumnOption | null,
 ): LineageColumnRegistration;
 export declare function createLocatePayload(input?: {
   itemKey?: unknown;
   libraryID?: unknown;
   state?: unknown;
+  paper?: unknown;
+  tab?: unknown;
 }): LineageLocatePayload | null;
 export declare function dispatchLineageLocate(
   target: unknown,

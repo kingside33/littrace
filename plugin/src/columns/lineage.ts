@@ -3,7 +3,6 @@ import {
   createColumnRegistration,
   createLocatePayload,
   dispatchLineageLocate,
-  fakeLineageDataProvider,
   itemKeyOf,
   itemRefOf,
   relationCount,
@@ -12,10 +11,11 @@ import type {
   LineageCellBadge,
   LineageColumnRegistration,
 } from "./lineageCore.mjs";
+import { paperData } from "./paperData";
 import { config } from "../../package.json";
 
 /**
- * 「谱系」item-tree column (A2 prototype, fake data).
+ * 「谱系」item-tree column (U1: real data).
  *
  * Registration goes through src/registry.ts like every other feature, but as
  * a *global* registration: columns are not window-scoped. Zotero keeps one
@@ -23,9 +23,15 @@ import { config } from "../../package.json";
  * closing a single main window must not unregister the column for the others
  * (ADR 0009). Disable/uninstall reclaims it in unregisterAll.
  *
- * The data and its contract live in lineageCore.mjs (plain ESM) so
- * tests/test_plugin_column.cjs runs the real logic without Zotero.
- * `renderCell` cannot be tested that way: it needs a Document. The
+ * The data now comes from the local service via src/columns/paperData.ts. A
+ * dataProvider is synchronous, so the first time a row is drawn the cache has
+ * nothing and the cell is blank; the fetch that miss starts lands a moment
+ * later and the tree is repainted. Offline and error cases stay blank — this
+ * column never invents a badge (issue #27 需求 3).
+ *
+ * The data and its contract live in lineageCore.mjs / columnDataCore.mjs
+ * (plain ESM) so tests/test_plugin_column.cjs runs the real logic without
+ * Zotero. `renderCell` cannot be tested that way: it needs a Document. The
  * DOM-independent half (what to draw, the click payload) is in the core.
  */
 
@@ -67,8 +73,8 @@ function renderLineageCell(
   cell.appendChild(symbol);
 
   const count = doc.createElement("span");
-  // Always the confirmed relation count (issue #22 需求 3): 「三态徽标 +
-  // 已确认关系数」. The state is the glyph, the breakdown is the title.
+  // Always the confirmed relation count (issue #22 需求 3, ADR 0012): 「三态
+  // 徽标 + 已确认关系数」. The state is the glyph, the breakdown is the title.
   count.textContent = String(relationCount(badge.counts));
   count.style.opacity = "0.85";
   cell.appendChild(count);
@@ -78,13 +84,18 @@ function renderLineageCell(
   symbol.title = title;
 
   if (itemKey) {
-    // Reserved hook for the 谱系 tab (U4): dispatch only, open nothing here.
+    // Open the 谱系 tab positioned on this paper (U1 需求 5). The payload is
+    // dispatched, not handled here: the tab belongs to another feature.
     cell.style.cursor = "pointer";
     cell.addEventListener("click", (event) => {
+      const libraryID = (item as { libraryID?: unknown })?.libraryID;
       const payload = createLocatePayload({
         itemKey,
-        libraryID: (item as { libraryID?: unknown })?.libraryID,
+        libraryID,
         state: badge.state,
+        // The identity `GET /api/v2/paper?paper=` accepts, so the listener
+        // can open the tab with `?paper=` without a second lookup.
+        paper: paperData().identityOf(item)?.key ?? null,
       });
       if (payload) {
         // Dispatch on the item tree's document: a document-level dispatch
@@ -112,7 +123,8 @@ export function createLineageColumn(): LineageColumnRegistration {
     Zotero.ItemTreeManager,
     pluginID,
     {
-      dataProvider: fakeLineageDataProvider,
+      dataProvider: (item: unknown, dataKey: string) =>
+        paperData().lineageProvider(item, dataKey),
       renderCell: renderLineageCell,
     },
   );
