@@ -222,12 +222,30 @@ test("badgeForText derives the badge from the exported text alone", async () => 
   assert.equal(core.badgeForText(null), null);
 });
 
-test("the count next to the badge always matches the state shown", async () => {
+test("the count next to the badge is always the confirmed relation count", async () => {
   const core = await loadCore();
-  assert.equal(core.primaryCount({ confirmed: 4, pending: 2, gaps: 9 }, "gap"), 9);
-  assert.equal(core.primaryCount({ confirmed: 4, pending: 2, gaps: 9 }, "pending"), 2);
-  assert.equal(core.primaryCount({ confirmed: 4, pending: 2, gaps: 9 }, "verified"), 4);
-  assert.equal(core.primaryCount({ confirmed: 4, pending: 2, gaps: 9 }, "empty"), 0);
+  // Issue #22 需求 3: 「三态徽标 + 已确认关系数」. A pending item shows its
+  // *confirmed* count (`○ 3`), not its pending count — the state is carried by
+  // the glyph and the full breakdown by the title, so the number means the
+  // same thing in every row (PR #23 finding, plugin/src/columns/lineage.ts:70).
+  const counts = { confirmed: 3, pending: 1, gaps: 0 };
+  assert.equal(core.badgeForText(core.cellText(counts)).state, "pending");
+  assert.equal(core.relationCount(counts), 3, "pending rows still show confirmed");
+  assert.equal(core.relationCount({ confirmed: 4, pending: 2, gaps: 9 }), 4);
+  assert.equal(core.relationCount({ confirmed: 0, pending: 2, gaps: 0 }), 0);
+  assert.equal(core.relationCount({ confirmed: 0, pending: 0, gaps: 1 }), 0);
+  assert.equal(core.relationCount(null), 0);
+  assert.equal(core.relationCount({ confirmed: "7" }), 7);
+
+  // Every fixture must render a number that parses back to its confirmed
+  // count, so the cell and the exported text cannot disagree.
+  for (let index = 0; index < 200; index += 1) {
+    const counts_ = core.fakeLineageFor(`FAKE${index}`);
+    if (core.badgeState(counts_) === "empty") {
+      continue;
+    }
+    assert.equal(core.relationCount(counts_), core.parseCellText(core.cellText(counts_)).confirmed);
+  }
 });
 
 test("the registered option only carries keys registerColumn accepts", async () => {

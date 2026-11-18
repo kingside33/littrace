@@ -6,7 +6,7 @@ import {
   fakeLineageDataProvider,
   itemKeyOf,
   itemRefOf,
-  primaryCount,
+  relationCount,
 } from "./lineageCore.mjs";
 import type {
   LineageCellBadge,
@@ -67,7 +67,9 @@ function renderLineageCell(
   cell.appendChild(symbol);
 
   const count = doc.createElement("span");
-  count.textContent = String(primaryCount(badge.counts, badge.state));
+  // Always the confirmed relation count (issue #22 需求 3): 「三态徽标 +
+  // 已确认关系数」. The state is the glyph, the breakdown is the title.
+  count.textContent = String(relationCount(badge.counts));
   count.style.opacity = "0.85";
   cell.appendChild(count);
 

@@ -72,7 +72,7 @@ export declare function normalizeCounts(record: unknown): LineageCounts;
 export declare function badgeState(counts: unknown): LineageState;
 export declare function stateBadge(state: string): LineageStateBadge | null;
 export declare function badgeForCounts(counts: unknown): LineageStateBadge | null;
-export declare function primaryCount(counts: unknown, state: string): number;
+export declare function relationCount(counts: unknown): number;
 export declare function badgeTitle(counts: unknown): string;
 export declare function cellText(counts: unknown): string;
 export declare function parseCellText(text: unknown): LineageCounts | null;

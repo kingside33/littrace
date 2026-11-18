@@ -137,21 +137,16 @@ export function badgeForCounts(counts) {
 }
 
 /**
- * The relation count rendered next to the badge. It always matches the state
- * shown, so the cell never says "verified" next to a zero.
+ * The relation count rendered next to the badge: always the number of
+ * *confirmed* relations (issue #22 需求 3 「三态徽标 + 已确认关系数」).
+ *
+ * Deliberately independent of the badge state. A pending item shows how many
+ * relations are already confirmed (`○ 3`), not how many are pending — the
+ * state is carried by the glyph and the full breakdown by the title, so the
+ * number has one meaning in every row.
  */
-export function primaryCount(counts, state) {
-  const normalized = normalizeCounts(counts);
-  switch (state) {
-    case "verified":
-      return normalized.confirmed;
-    case "pending":
-      return normalized.pending;
-    case "gap":
-      return normalized.gaps;
-    default:
-      return 0;
-  }
+export function relationCount(counts) {
+  return normalizeCounts(counts).confirmed;
 }
 
 /**
