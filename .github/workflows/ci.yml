@@ -161,6 +161,9 @@ jobs:
             tests/test_feedback.cjs
             tests/test_lineage.cjs
             tests/test_page_performance.cjs
+            tests/test_plugin_hooks.cjs
+            tests/test_plugin_manifest.cjs
+            tests/test_plugin_registry.cjs
             tests/test_references.cjs
             tests/test_reliability_graph.cjs
             tests/test_role_bubbles.cjs
@@ -205,11 +208,54 @@ jobs:
             tests/test_feedback.cjs \
             tests/test_lineage.cjs \
             tests/test_page_performance.cjs \
+            tests/test_plugin_hooks.cjs \
+            tests/test_plugin_manifest.cjs \
+            tests/test_plugin_registry.cjs \
             tests/test_references.cjs \
             tests/test_reliability_graph.cjs \
             tests/test_role_bubbles.cjs \
             tests/test_search.cjs \
             tests/test_task_entry.cjs
+
+  # The plugin builds with zotero-plugin-scaffold (esbuild + zip) and never
+  # touches a Zotero binary in CI: `zotero-plugin build` does not read
+  # binPath/profilePath, so no Zotero install is needed here.
+  #
+  # Same matrix shape as frontend-tests and pytest. esbuild ships one
+  # platform-specific native binary per runner OS, so building on both legs
+  # verifies the committed package-lock.json resolves on both. littrace is
+  # developed on Windows (the primary and only verified platform), so
+  # windows-latest is the load-bearing leg; ubuntu is the cross-check.
+  #
+  # No npm cache: the plugin dependency tree is two dev packages, far below
+  # the size where cache setup pays for itself.
+  plugin-build:
+    name: plugin-build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    defaults:
+      run:
+        working-directory: plugin
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Install build dependencies
+        run: npm ci
+      - name: Build the plugin XPI
+        run: npm run build
+      - name: Check the XPI exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          XPI=$(ls .scaffold/build/*.xpi)
+          test -s "$XPI"
+          echo "XPI built: $XPI"
 
   # DCO replaces a CLA. The check is a script, not a third-party action, and it
   # reads the script, DCO and CONTRIBUTING.md from the default branch. It never
