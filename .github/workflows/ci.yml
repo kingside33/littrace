@@ -164,10 +164,12 @@ jobs:
             tests/test_plugin_column.cjs
             tests/test_plugin_hooks.cjs
             tests/test_plugin_manifest.cjs
+            tests/test_plugin_prefs.cjs
             tests/test_plugin_reader.cjs
             tests/test_plugin_registry.cjs
             tests/test_plugin_sections.cjs
             tests/test_plugin_service_client.cjs
+            tests/test_plugin_status.cjs
             tests/test_plugin_tabs.cjs
             tests/test_references.cjs
             tests/test_reliability_graph.cjs
@@ -216,10 +218,12 @@ jobs:
             tests/test_plugin_column.cjs \
             tests/test_plugin_hooks.cjs \
             tests/test_plugin_manifest.cjs \
+            tests/test_plugin_prefs.cjs \
             tests/test_plugin_reader.cjs \
             tests/test_plugin_registry.cjs \
             tests/test_plugin_sections.cjs \
             tests/test_plugin_service_client.cjs \
+            tests/test_plugin_status.cjs \
             tests/test_plugin_tabs.cjs \
             tests/test_references.cjs \
             tests/test_reliability_graph.cjs \

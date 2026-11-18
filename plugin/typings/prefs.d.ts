@@ -8,6 +8,11 @@ declare namespace _ZoteroTypes {
   interface Prefs {
     PluginPrefsMap: {
       "enable": boolean;
+      "connection.port": string;
+      "integration.column.lineage": boolean;
+      "integration.column.reading": boolean;
+      "pro.cross-check-report": boolean;
+      "pro.parallel-driver": boolean;
     };
   }
 }

@@ -1,5 +1,5 @@
 import { config } from "../../package.json";
-import { SERVICE_BASE_URL } from "../service-client";
+import { serviceBaseUrlFromPrefs } from "../prefs/serviceOrigin";
 import { t } from "../utils/locale";
 import { listenLineageLocate } from "../columns/lineageCore.mjs";
 import {
@@ -189,7 +189,9 @@ function buildHost(win: Window): TabHost {
       return false;
     }
     const spec = tabNodeSpec(id, {
-      baseUrl: SERVICE_BASE_URL,
+      // The origin is read when the tab opens, so a port changed in the
+      // settings page applies to the next opened tab (U5).
+      baseUrl: serviceBaseUrlFromPrefs(),
       paper: options.paper,
     });
     if (!spec) {

@@ -1,0 +1,125 @@
+<vbox
+  id="littrace-prefs-root"
+  onload="Zotero.Littrace &amp;&amp; Zotero.Littrace.prefsPane &amp;&amp; Zotero.Littrace.prefsPane.onPaneLoad(document)"
+>
+  <!-- Fluent resources are shared across plugins (Zotero consolidates every
+       plugin's locale directory into one L10nFileSource), so the plugin name is
+       the namespace: every id here is littrace-<key>. The linkset sits inside
+       the root element exactly like Zotero's own preferences panes. -->
+  <linkset>
+    <html:link rel="localization" href="littrace-addon.ftl" />
+  </linkset>
+
+  <!-- Shown only on a platform the M1 build does not support. The markup is
+       always present; prefsPane.onPaneLoad() decides whether it stays hidden. -->
+  <vbox id="littrace-prefs-platform" hidden="true">
+    <description data-l10n-id="littrace-prefs-platform-unsupported" />
+    <description data-l10n-id="littrace-prefs-platform-unsupported-desc" />
+  </vbox>
+
+  <groupbox>
+    <label><html:h2 data-l10n-id="littrace-prefs-group-connection" /></label>
+    <description data-l10n-id="littrace-prefs-group-connection-desc" />
+
+    <hbox align="center">
+      <label data-l10n-id="littrace-prefs-service-host" />
+      <label data-l10n-id="littrace-prefs-service-host-value" />
+    </hbox>
+    <description data-l10n-id="littrace-prefs-service-host-desc" />
+
+    <hbox align="center">
+      <label
+        control="littrace-prefs-port"
+        data-l10n-id="littrace-prefs-connection-port"
+      />
+      <!-- The preference attribute is the full key: Zotero's pane loader binds
+           it and persists changes, so this row needs no plugin code. -->
+      <html:input
+        id="littrace-prefs-port"
+        type="text"
+        size="6"
+        preference="extensions.zotero.littrace.connection.port"
+      />
+    </hbox>
+    <description data-l10n-id="littrace-prefs-connection-port-desc" />
+
+    <hbox align="center">
+      <label data-l10n-id="littrace-prefs-connection-health" />
+      <label
+        id="littrace-prefs-health"
+        data-l10n-id="littrace-prefs-health-checking"
+      />
+      <html:button id="littrace-prefs-refresh" data-l10n-id="littrace-prefs-refresh" />
+    </hbox>
+    <description data-l10n-id="littrace-prefs-diagnostics-hint" />
+  </groupbox>
+
+  <groupbox>
+    <label><html:h2 data-l10n-id="littrace-prefs-group-integration" /></label>
+    <description data-l10n-id="littrace-prefs-group-integration-desc" />
+
+    <checkbox
+      id="littrace-prefs-column-lineage"
+      preference="extensions.zotero.littrace.integration.column.lineage"
+      data-l10n-id="littrace-prefs-integration-lineage-column"
+    />
+    <description data-l10n-id="littrace-prefs-integration-lineage-column-desc" />
+
+    <checkbox
+      id="littrace-prefs-column-reading"
+      preference="extensions.zotero.littrace.integration.column.reading"
+      data-l10n-id="littrace-prefs-integration-reading-column"
+    />
+    <description data-l10n-id="littrace-prefs-integration-reading-column-desc" />
+
+    <description data-l10n-id="littrace-prefs-integration-deeplink" />
+    <description data-l10n-id="littrace-prefs-integration-deeplink-desc" />
+  </groupbox>
+
+  <groupbox>
+    <label><html:h2 data-l10n-id="littrace-prefs-group-pro" /></label>
+    <description data-l10n-id="littrace-prefs-group-pro-desc" />
+
+    <hbox align="center">
+      <label data-l10n-id="littrace-prefs-pro-status" />
+      <label
+        id="littrace-prefs-pro-state"
+        data-l10n-id="littrace-prefs-pro-not-running"
+      />
+    </hbox>
+
+    <hbox align="center">
+      <label
+        control="littrace-prefs-pro-activate"
+        data-l10n-id="littrace-prefs-pro-activate"
+      />
+      <html:input
+        id="littrace-prefs-pro-activate"
+        type="text"
+        size="28"
+        disabled="true"
+      />
+    </hbox>
+    <description data-l10n-id="littrace-prefs-pro-activate-hint" />
+
+    <checkbox
+      id="littrace-prefs-pro-cross-check"
+      preference="extensions.zotero.littrace.pro.cross-check-report"
+      data-l10n-id="littrace-prefs-pro-cross-check"
+      disabled="true"
+    />
+    <description data-l10n-id="littrace-prefs-pro-cross-check-desc" />
+
+    <checkbox
+      id="littrace-prefs-pro-parallel-driver"
+      preference="extensions.zotero.littrace.pro.parallel-driver"
+      data-l10n-id="littrace-prefs-pro-parallel-driver"
+      disabled="true"
+    />
+    <description data-l10n-id="littrace-prefs-pro-parallel-driver-desc" />
+
+    <description data-l10n-id="littrace-prefs-pro-needed" />
+  </groupbox>
+
+  <description data-l10n-id="littrace-prefs-first-run-note" />
+</vbox>

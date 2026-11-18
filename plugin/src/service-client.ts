@@ -11,6 +11,7 @@ import {
   createServiceClient,
   ServiceClientError,
 } from "./serviceClientCore.mjs";
+import { serviceBaseUrlFromPrefs } from "./prefs/serviceOrigin";
 
 /**
  * The Zotero adapter of the unified service client (S4).
@@ -31,11 +32,14 @@ import {
  */
 
 /**
- * The local service origin. The port mirrors kbapp/core/config.py's default
- * `port` (8765) — the plugin speaks to the same process the service starts.
- * A per-user override is deliberately not a pref yet: the service manager
- * (U5/U7) is where a non-default port becomes a supported configuration, and
- * adding a pref before it exists would be a setting nobody can set.
+ * The default local service origin. The port mirrors kbapp/core/config.py's
+ * default `port` (8765) — the plugin speaks to the same process the service
+ * starts.
+ *
+ * U5 made the port a user preference (the settings page's connection group),
+ * so this constant is the fallback, not the answer: `createClient()` and the
+ * iframe tabs read the origin through `serviceBaseUrlFromPrefs()` at call
+ * time. The host stays 127.0.0.1 there — the service is loopback-only.
  */
 export const SERVICE_BASE_URL = "http://127.0.0.1:8765";
 
@@ -98,7 +102,9 @@ export function createClient(
   options: { baseUrl?: string; requirements?: Requirements } = {},
 ): ServiceClient {
   return createServiceClient({
-    baseUrl: options.baseUrl || SERVICE_BASE_URL,
+    // Read the port per client creation: the settings page can change it, and
+    // a cached origin would silently keep talking to the old port.
+    baseUrl: options.baseUrl || serviceBaseUrlFromPrefs(),
     request: zoteroTransport,
     requirements: options.requirements,
   });
