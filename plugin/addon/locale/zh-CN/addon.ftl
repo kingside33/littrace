@@ -3,19 +3,26 @@
 startup-begin = littrace 加载中
 startup-finish = littrace 已就绪
 
-# 阅读器「证据问答」面板(A3 原型)。全部内容为静态假数据。
+# 阅读器「证据问答」面板。回答来自本地 littrace 服务(U3)。
 reader-panel-title = 证据问答
-reader-panel-demo-note = 原型:内容为静态假数据,不连接本地服务
+reader-panel-source-note = 回答来自本地 littrace 服务
 reader-panel-placeholder = 就这篇文章提问
 reader-panel-ask = 提问
 reader-panel-example = 例如:这个方法在哪些实验条件下成立?
 reader-panel-wait = 上一问还在进行,完成后再提交
 reader-panel-empty = 还没有提问。输入一个问题,或选中正文后用「查证据」。
+reader-panel-stage-queued = 已提交,等待本地服务
 reader-panel-stage-searching = 检索证据
+reader-panel-stage-writing = 撰写结论
 reader-panel-stage-verifying = 核验结论
 reader-panel-gap = 缺口
 reader-panel-gap-hint = 这一问没有可定位页码的原文证据,只保留问题本身。
 reader-panel-evidence = 证据原文
+reader-panel-evidence-title = 证据
+reader-panel-guide = 云端问答尚未启用
+reader-panel-guide-cloud = 回答需要云端问答。请在「设置 → 模型与费用」中配置并启用,然后重新提问。这里不提供重试:没有云 key 时重试只会以同样的方式失败。
+reader-panel-guide-settings = 去设置
+reader-panel-jump-copied = 已复制深链:
 reader-panel-failure = 本轮未完成
 reader-panel-retry = 重试
 reader-panel-toolbar-entry = 证据问答

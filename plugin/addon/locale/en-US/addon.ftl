@@ -4,19 +4,26 @@
 startup-begin = littrace is loading
 startup-finish = littrace is ready
 
-# Reader evidence-Q&A panel (A3 prototype). All content is static fake data.
+# Reader evidence-Q&A panel. Answers come from the local littrace service (U3).
 reader-panel-title = Evidence Q&A
-reader-panel-demo-note = Prototype: static fake data, no local service
+reader-panel-source-note = Answers from the local littrace service
 reader-panel-placeholder = Ask about this paper
 reader-panel-ask = Ask
 reader-panel-example = For example: under which experimental conditions does this method hold?
 reader-panel-wait = The previous question is still running; submit again when it finishes
 reader-panel-empty = No question yet. Type one, or select text and use Check evidence.
+reader-panel-stage-queued = Queued for the service
 reader-panel-stage-searching = Retrieving evidence
+reader-panel-stage-writing = Writing claims
 reader-panel-stage-verifying = Verifying claims
 reader-panel-gap = Gap
 reader-panel-gap-hint = No original evidence with a locatable page answered this question; only the question is kept.
 reader-panel-evidence = Evidence text
+reader-panel-evidence-title = Evidence
+reader-panel-guide = Cloud Q&A is not enabled
+reader-panel-guide-cloud = Answers need cloud Q&A. Enable it in Settings → Models & costs, then ask again. There is no retry here: retrying without the key only fails the same way.
+reader-panel-guide-settings = Open settings
+reader-panel-jump-copied = Deep link copied:
 reader-panel-failure = This round did not finish
 reader-panel-retry = Retry
 reader-panel-toolbar-entry = Evidence Q&A
