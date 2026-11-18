@@ -235,12 +235,39 @@ export function createDataProvider(resolveRecord) {
   };
 }
 
-/** Item key of a Zotero item, or "" for rows that are not items. */
-export function itemKeyOf(item) {
-  if (!item || typeof item !== "object") {
+/**
+ * Whether a row ref is a real item (as opposed to a collection, saved search,
+ * library header or spacer that the item tree also hands to renderCell).
+ *
+ * `Zotero.Collection` and `Zotero.Search` carry their own `.key`
+ * (collection.js `obj.key = this.key`, search.js likewise), so key presence
+ * alone would badge trashed collections and saved searches in the trash view.
+ * `_objectType` is the discriminator Zotero itself uses: 'item' for
+ * Zotero.Item, 'collection' / 'search' for the others (item.js:99,
+ * collection.js:39, search.js:44).
+ */
+export function isItemRef(ref) {
+  if (!ref || typeof ref !== "object") {
+    return false;
+  }
+  if (ref._objectType !== undefined) {
+    return ref._objectType === "item";
+  }
+  // Object type not exposed: the item-only API is the fallback. Collections
+  // and searches define neither isRegularItem nor getField.
+  return typeof ref.isRegularItem === "function" && typeof ref.getField === "function";
+}
+
+/**
+ * Item key of a Zotero item, or "" for anything that is not one (a trashed
+ * collection / saved search also has `.key`, so the object type is checked
+ * first). An empty key means "nothing to show and nothing to locate".
+ */
+export function itemKeyOf(ref) {
+  if (!isItemRef(ref)) {
     return "";
   }
-  const key = item.key;
+  const key = ref.key;
   return typeof key === "string" ? key.trim() : "";
 }
 
@@ -263,9 +290,23 @@ export function itemKeyOf(item) {
  * several library tabs open it can name the same row index of the active
  * tab instead. This is prototype-grade targeting for the reserved click
  * hook — before U1 binds real data the payload should be derived from the
- * row itself. Null for header/spacer rows and for any unexpected context.
+ * row itself.
+ *
+ * Returns null for anything that is not a real item: collection / saved-search
+ * rows (the trash view renders them and they also have `.key`) and
+ * header/spacer rows have no lineage to locate.
  */
 export function itemRefOf(context, index, doc) {
+  try {
+    const ref = findRowRef(context, index, doc);
+    return isItemRef(ref) ? ref : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Raw row ref, without the item check; every lookup failure yields null. */
+function findRowRef(context, index, doc) {
   try {
     if (context && typeof context.getRow === "function") {
       const row = context.getRow(index);
@@ -315,9 +356,16 @@ export function fakeLineageFor(key) {
   return { ...FAKE_FIXTURES[stableHash(source) % FAKE_FIXTURES.length] };
 }
 
-/** The dataProvider actually registered on the column in A2. */
+/**
+ * The dataProvider actually registered on the column in A2.
+ *
+ * Non-item rows (trashed collections / saved searches, which also have keys
+ * but no lineage) resolve to the empty record, so they render a blank cell
+ * rather than a fake badge — the same guard itemKeyOf applies to the click
+ * payload.
+ */
 export const fakeLineageDataProvider = createDataProvider((item) =>
-  fakeLineageFor(itemKeyOf(item)),
+  isItemRef(item) ? fakeLineageFor(itemKeyOf(item)) : zeroCounts(),
 );
 
 /**

@@ -25,6 +25,16 @@ async function loadCore() {
   return import(CORE_URL);
 }
 
+/**
+ * Minimal stand-in for a Zotero.Item as the row ref the column sees. It
+ * carries `_objectType: "item"` because that is what distinguishes a real
+ * item from a collection or saved search (collection.js:39, search.js:44,
+ * item.js:99) — a bare `{ key }` is deliberately *not* proven to be an item.
+ */
+function item(key, libraryID = 1) {
+  return { _objectType: "item", key, libraryID };
+}
+
 function fakeManager() {
   const calls = { register: [], unregister: [] };
   let nextKey = 0;
@@ -122,16 +132,17 @@ test("dataProvider is empty for every empty / error / offline input", async () =
     "",
     [],
     {},
-    { key: "" },
-    { key: 42 },
-    { key: "   " },
-    { key: null },
+    item(""),
+    item(42),
+    item("   "),
+    item(null),
+    { key: "ABCD1234" }, // no object type: not proven to be an item
   ];
-  for (const item of inputs) {
+  for (const value of inputs) {
     assert.equal(
-      core.fakeLineageDataProvider(item, "lineage"),
+      core.fakeLineageDataProvider(value, "lineage"),
       "",
-      `item ${JSON.stringify(item)} must yield an empty cell`,
+      `item ${JSON.stringify(value)} must yield an empty cell`,
     );
   }
   // A resolver that throws (offline service, schema drift) must not escape:
@@ -139,22 +150,60 @@ test("dataProvider is empty for every empty / error / offline input", async () =
   const throwing = core.createDataProvider(() => {
     throw new Error("service offline");
   });
-  assert.equal(throwing({ key: "ABCD1234" }, "lineage"), "");
+  assert.equal(throwing(item("ABCD1234"), "lineage"), "");
   assert.equal(throwing(null, "lineage"), "");
   // And neither may the raw resolver itself be reachable: the provider
   // returns a string for every input, never undefined/null/object.
   const provider = core.fakeLineageDataProvider;
-  for (const item of [...inputs, { key: "ABCD1234" }]) {
-    assert.equal(typeof provider(item, "lineage"), "string");
+  for (const value of [...inputs, item("ABCD1234")]) {
+    assert.equal(typeof provider(value, "lineage"), "string");
   }
   assert.equal(core.cellText(offline()), "");
 });
 
+test("trashed collections and saved searches get no badge and no locate payload", async () => {
+  const core = await loadCore();
+  // Zotero.Collection (collection.js:39) and Zotero.Search (search.js:44)
+  // both carry a `.key`, so the trash view would otherwise show a fake badge
+  // for them and dispatch a locate payload carrying a non-item key that U4
+  // cannot resolve (PR #23 finding, plugin/src/columns/lineageCore.mjs:248).
+  const collection = { _objectType: "collection", key: "COLL1234", name: "已删除分类" };
+  const search = { _objectType: "search", key: "SEARCH12", name: "已删除检索" };
+  const header = { _objectType: "header" };
+  const spacer = { _objectType: "spacer" };
+
+  for (const ref of [collection, search, header, spacer]) {
+    assert.equal(core.isItemRef(ref), false, `${ref._objectType} is not an item`);
+    assert.equal(core.itemKeyOf(ref), "", "a non-item has no item key");
+    assert.equal(
+      core.fakeLineageDataProvider(ref, "lineage"),
+      "",
+      "a non-item row must render a blank cell, not a fake badge",
+    );
+  }
+
+  // A real item is unaffected, including one whose row also carries extras.
+  assert.equal(core.isItemRef(item("ABCD1234")), true);
+  assert.equal(core.itemKeyOf(item("ABCD1234")), "ABCD1234");
+  assert.notEqual(core.fakeLineageDataProvider(item("ABCD1234"), "lineage"), "");
+
+  // Without _objectType the item-only API decides: Collection and Search
+  // define neither isRegularItem nor getField.
+  const bareItem = { key: "ABCD1234", isRegularItem: () => true, getField: () => "" };
+  assert.equal(core.isItemRef(bareItem), true);
+  assert.equal(core.isItemRef({ key: "X", isRegularItem: () => false }), false);
+  assert.equal(core.isItemRef({ key: "X", getField: () => "" }), false);
+  assert.equal(core.isItemRef({ _objectType: "item", key: "K" }), true);
+  assert.equal(core.isItemRef({ _objectType: "item", key: "K" }).toString(), "true");
+  assert.equal(core.itemKeyOf({ _objectType: "item", key: 7 }), "", "a non-string key is not usable");
+});
+
 test("the same item always produces the same text", async () => {
   const core = await loadCore();
-  const first = { key: "ITEMKEY1", libraryID: 1 };
-  const second = { key: "ITEMKEY1", libraryID: 1 };
+  const first = item("ITEMKEY1", 1);
+  const second = item("ITEMKEY1", 1);
   const firstText = core.fakeLineageDataProvider(first, "lineage");
+  assert.notEqual(firstText, "", "a real item must produce fake lineage text");
   assert.equal(core.fakeLineageDataProvider(second, "lineage"), firstText);
   assert.equal(core.fakeLineageDataProvider(first, "lineage"), firstText);
   assert.equal(core.fakeLineageDataProvider(first, "other-data-key"), firstText);
@@ -171,7 +220,7 @@ test("a library of fake items shows all four outcomes, badges included", async (
     const key = `FAKE${index}`;
     const counts = core.fakeLineageFor(key);
     const state = core.badgeState(counts);
-    const text = core.fakeLineageDataProvider({ key }, "lineage");
+    const text = core.fakeLineageDataProvider(item(key), "lineage");
     seen.add(state);
     // Every text that is not blank must round-trip back to the same counts,
     // so renderCell can rebuild exactly the badge the dataProvider meant.
@@ -376,7 +425,7 @@ test("dispatch never throws on a missing target, payload or DOM", async () => {
 
 test("item refs are read from the tree, never through private globals", async () => {
   const core = await loadCore();
-  const ref = { key: "K" };
+  const ref = item("K");
   assert.equal(core.itemRefOf({ getRow: (index) => (index === 3 ? { ref } : null) }, 3), ref);
   assert.equal(core.itemRefOf({ getRow: () => ({}) }, 0), null, "header/spacer rows have no ref");
   assert.equal(core.itemRefOf({ getRow: () => null }, 0), null);
@@ -386,6 +435,14 @@ test("item refs are read from the tree, never through private globals", async ()
   );
   assert.equal(core.itemRefOf(null, 0), null);
   assert.equal(core.itemRefOf({}, 0), null);
+
+  // A collection row reaches this function too, and it must not look like an
+  // item: no badge, no locate payload (PR #23 finding, lineageCore.mjs:248).
+  assert.equal(
+    core.itemRefOf({ getRow: () => ({ ref: { _objectType: "collection", key: "COLL1234" } }) }, 0),
+    null,
+    "collection rows are not items",
+  );
 
   // renderCell cannot rely on `this`: pluginAPIBase.mjs wraps every option
   // function in an arrow function before storing it, so the ItemTree's
@@ -428,10 +485,10 @@ test("item refs are read from the tree, never through private globals", async ()
   assert.equal(
     core.itemRefOf(undefined, 0, {
       defaultView: {
-        ZoteroPane: { itemsView: { getRow: () => ({ ref: "active" }) } },
-        ZoteroPane_Local: { itemsView: { getRow: () => ({ ref: "local" }) } },
+        ZoteroPane: { itemsView: { getRow: () => ({ ref: item("active") }) } },
+        ZoteroPane_Local: { itemsView: { getRow: () => ({ ref: item("local") }) } },
       },
-    }),
+    }).key,
     "active",
     "the active pane wins over the fallbacks",
   );
@@ -490,8 +547,7 @@ test("the column is wired through the plugin's single registration entry", () =>
   );
 });
 
-/** Minimal stand-in for a Document/Window: only what the core touches. */
-class fakeEventTarget {
+/** Minimal stand-in for a Document/Window: only what the core touches. */class fakeEventTarget {
   constructor() {
     this.listeners = new Map();
     this.lastEvent = null;

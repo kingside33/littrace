@@ -80,6 +80,7 @@ export declare function badgeForText(text: unknown): LineageCellBadge | null;
 export declare function createDataProvider(
   resolveRecord: RecordResolver,
 ): DataProvider;
+export declare function isItemRef(ref: unknown): boolean;
 export declare function itemKeyOf(item: unknown): string;
 export declare function itemRefOf(
   context: unknown,
