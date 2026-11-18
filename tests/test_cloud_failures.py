@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 from pathlib import Path
 import socket
 import ssl
@@ -11,13 +12,24 @@ import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from kbapp.storage.store import Store
 from kbapp.integrations.cloud import complete, failure_details, CloudOutputLimitError
 from kbapp.workflows.dashboard import dashboard
 from kbapp.workflows.agents import create_run
 
+# 每个用例都要在 setUp 里通过 save_settings 写入 api_key,而这会调用 DPAPI 密钥保护。
+# 该保护只在 Windows 提供(见 kbapp/core/secrets.py),非 Windows 上是设计边界而非缺陷,
+# 因此整个类按平台如实跳过,而不是让整套件在 Linux 上红灯。
+DPAPI_REQUIRED = pytest.mark.skipif(
+    os.name != 'nt',
+    reason='DPAPI 密钥保护仅 Windows 提供,见 kbapp/core/secrets.py',
+)
 
+
+@DPAPI_REQUIRED
 class CloudFailures(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
