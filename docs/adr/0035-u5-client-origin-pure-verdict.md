@@ -35,7 +35,11 @@
 端口改动在**下一次请求**即生效,不需要重启 Zotero。
 
 代价是 `serviceClient()` 每次调用多一次 pref 读取(纯内存读,可接受)。同端口
-重启服务时令牌仍会失效,由现有 403 分支自动重取。
+重启服务时缓存令牌同样失效:403 分支把 `token` 置 `null` 后**抛出**
+`ServiceClientError(kind: "session")`(`serviceClientCore.mjs:586-593`,注释原文
+「Drop it so the caller's explicit retry fetches a fresh one」),令牌由下一次请求
+重新取得——即**调用方的显式重试**,不是客户端自动重取(ADR 0018:客户端内部无
+任何重试逻辑,失败一律抛给调用方)。
 
 判定逻辑已被 `tests/test_plugin_prefs.cjs:291-319` 锁定:同 origin 复用、尾斜杠
 视为差异、缺值一律重建,并对 `service-client.ts` 的调用点做源码锚定。**真机仍需
