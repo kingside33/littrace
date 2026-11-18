@@ -647,13 +647,39 @@ function canLaunchExternal(): boolean {
   return typeof api.launchURL === "function";
 }
 
-/** Hand one deep link to Zotero. 待真机定案 (M0 ④): the launchURL shape. */
-function launchExternal(href: string): void {
+/**
+ * The one host-link capability check, exported so other privileged surfaces
+ * (the reader panel's citation badges, U3) ask the same question as the iframe
+ * bridge instead of growing a second copy that drifts.
+ */
+export function canOpenHostLink(): boolean {
+  return canLaunchExternal();
+}
+
+/**
+ * Hand one link to the host (`zotero://…`, the settings page, …).
+ *
+ * Returns false when this build has no launcher or the call throws, so the
+ * caller can degrade visibly (copy the link text) instead of swallowing the
+ * click — the repository rule is that an entry either works or says why.
+ */
+export function openHostLink(href: string): boolean {
+  if (!canLaunchExternal()) {
+    return false;
+  }
   try {
     Zotero.launchURL(href);
+    return true;
   } catch (error) {
-    // The click was already consumed; the accepted recovery is switching
-    // BRIDGE_MODE to "native", which is exactly why that switch exists.
-    report(error, `打开外部链接 ${href}`);
+    report(error, `打开链接 ${href}`);
+    return false;
   }
+}
+
+/** Hand one deep link to Zotero. 待真机定案 (M0 ④): the launchURL shape. */
+function launchExternal(href: string): void {
+  // The click was already consumed by the bridge; whether the launcher exists
+  // is exactly the BRIDGE_MODE "native" switch, so the boolean is not acted
+  // on again here.
+  openHostLink(href);
 }
