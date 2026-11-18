@@ -29,5 +29,9 @@
 ## 后果
 
 所有本地请求最多等 10s 且最多发一次,一次抖动即把错误交给 UI 由用户决定重试;代价是
-瞬时故障不再自愈。该纪律由测试对每个记录到的请求逐条断言(`errorDelayMax === 0`、
-`timeout === 10000`),新功能绕过 `buildRequest` 时测试立刻变红。
+瞬时故障不再自愈。该纪律由测试对经客户端构造的每个请求逐条断言(`errorDelayMax === 0`、
+`timeout === 10000`,`tests/test_plugin_service_client.cjs`),`buildRequest` 本身另有
+直接单测。这只是调用路径上的保证:仓库目前没有枚举全部请求构造点的源码守卫(例如断言
+`Zotero.HTTP` 只出现在 `plugin/src/service-client.ts`),新增一条绕过 `buildRequest`
+的请求路径时现有测试仍会全绿,纪律会被悄悄破坏。因此新请求必须复用 `buildRequest`;
+要获得自动拦截需另行补源码守卫。
