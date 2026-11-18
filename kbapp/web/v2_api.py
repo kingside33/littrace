@@ -6,8 +6,8 @@
 from __future__ import annotations
 from fastapi import HTTPException, Query
 
-from kbapp.web.schemas import (ApiMeta, PaperResponse, SearchLevel, SearchQuery, SearchResponse,
-                               SourceKind, StatusResponse, TaskListResponse)
+from kbapp.web.schemas import (ApiMeta, PaperResponse, PaperSectionsResponse, SearchLevel, SearchQuery,
+                               SearchResponse, SourceKind, StatusResponse, TaskListResponse)
 
 
 def install(app, context, token):
@@ -55,5 +55,15 @@ def install(app, context, token):
         from kbapp.web.library_api import paper_view
         try:
             return paper_view(store, paper)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from None
+
+    @app.get('/api/v2/paper/sections', response_model=PaperSectionsResponse)
+    def paper_sections_v2(paper: str):
+        # 条目面板(U2)：一次请求拿齐三 section 的只读快照；文献不在库内时 404，
+        # 插件据此显示「未索引」空态而不是错误态。
+        from kbapp.research.panel import panel_snapshot
+        try:
+            return panel_snapshot(store, paper)
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from None

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- 证据(header 16x16,占位图标)。颜色随宿主主题(context-fill)。 -->
+  <path d="M4 1.8h4.6L11.5 4.7v3.1" fill="none" stroke="context-fill" stroke-width="1.1"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M4 1.8h4.6L11.5 4.7v8.5A0.9 0.9 0 0 1 10.6 14.1H3.9A0.9 0.9 0 0 1 3 13.2V2.7A0.9 0.9 0 0 1 3.9 1.8Z"
+        fill="context-fill" fill-opacity="0.15" stroke="context-fill" stroke-width="1.1"
+        stroke-linejoin="round"/>
+  <path d="M4.8 5.8h3.4M4.8 7.7h3.4M4.8 9.6h1.9" stroke="context-fill" stroke-width="1"
+        stroke-linecap="round"/>
+  <circle cx="10.7" cy="10.7" r="1.8" fill="context-fill" fill-opacity="0.25"
+          stroke="context-fill" stroke-width="1.1"/>
+  <path d="M12.1 12.1l1.5 1.5" stroke="context-fill" stroke-width="1.2" stroke-linecap="round"/>
+</svg>
