@@ -229,8 +229,14 @@ test("the deep-link predicate only accepts zotero: and obsidian:", async () => {
   }
 });
 
-test("a lineage locate payload opens the 谱系 tab at that paper", async () => {
+test("a lineage locate payload becomes a littrace paper id, not a raw Zotero key", async () => {
   const core = await loadCore();
+  // `itemKey` is a Zotero item key. The service resolves `?paper=` through
+  // Store.resolve (kbapp/storage/store.py:155-167), whose aliases table holds
+  // paper id / citekey / openalex_id / doi -- a bare Zotero key resolves to
+  // nothing, so paper_view raises 「文献不存在」 and graph_page returns an
+  // unfiltered graph. littrace's id for a Zotero item is
+  // z:<libraryID>:<zoteroKey> (kbapp/library/sources.py:34-40).
   assert.deepEqual(
     core.locateRequestOf({
       source: "lineage-column",
@@ -238,13 +244,59 @@ test("a lineage locate payload opens the 谱系 tab at that paper", async () => 
       libraryID: 1,
       state: "verified",
     }),
-    { tab: "graph", paper: "ABCD1234" },
+    { tab: "graph", paper: "z:1:ABCD1234" },
   );
+  // The library id is part of the identity: the same key in a group library
+  // is a different paper.
+  assert.deepEqual(
+    core.locateRequestOf({ itemKey: "ABCD1234", libraryID: 2 }),
+    { tab: "graph", paper: "z:2:ABCD1234" },
+  );
+  assert.deepEqual(
+    core.locateRequestOf({ itemKey: "ABCD1234", libraryID: "3" }),
+    { tab: "graph", paper: "z:3:ABCD1234" },
+  );
+
   // No usable key: ignore the event instead of opening an unfiltered tab.
   assert.equal(core.locateRequestOf({ itemKey: "   " }), null);
   assert.equal(core.locateRequestOf({}), null);
   assert.equal(core.locateRequestOf(null), null);
   assert.equal(core.locateRequestOf("ABCD1234"), null);
+  // A missing library id is refused, not guessed: the service would default
+  // it to 1 and silently open the wrong paper for a group library.
+  assert.equal(core.locateRequestOf({ itemKey: "ABCD1234" }), null);
+  assert.equal(core.locateRequestOf({ itemKey: "ABCD1234", libraryID: null }), null);
+  assert.equal(core.locateRequestOf({ itemKey: "ABCD1234", libraryID: 1.5 }), null);
+  assert.equal(core.locateRequestOf({ itemKey: "ABCD1234", libraryID: -1 }), null);
+  assert.equal(core.locateRequestOf({ itemKey: "ABCD1234", libraryID: "x" }), null);
+});
+
+test("the locate deep link round-trips into ?paper= the service can resolve", async () => {
+  const core = await loadCore();
+  const request = core.locateRequestOf({ itemKey: "AAAA1111", libraryID: 1 });
+  assert.deepEqual(request, { tab: "graph", paper: "z:1:AAAA1111" });
+  // This exact URL shape is what graph_page resolves to a real neighborhood;
+  // `?paper=AAAA1111` alone yields 0 nodes / 0 edges.
+  assert.equal(
+    core.tabUrl(request.tab, { baseUrl: THUMBNAIL_BASE, paper: request.paper }),
+    `${THUMBNAIL_BASE}/?paper=z%3A1%3AAAAA1111#graph`,
+  );
+});
+
+test("a refused locate payload says why instead of failing silently", async () => {
+  const core = await loadCore();
+  // A click that opens nothing must be visible: the repository rule is that a
+  // disabled entry explains itself, and a silent return here is the控件
+  // "clicked, nothing happened" state.
+  assert.equal(
+    core.locateRefusalOf({ itemKey: "ABCD1234", libraryID: 1 }),
+    null,
+    "a usable payload has no refusal",
+  );
+  assert.match(core.locateRefusalOf({ itemKey: "ABCD1234" }), /libraryID/);
+  assert.match(core.locateRefusalOf({ libraryID: 1 }), /条目 key/);
+  assert.match(core.locateRefusalOf(null), /载荷/);
+  assert.match(core.locateRefusalOf("ABCD1234"), /载荷/);
 });
 
 test("the open mechanism falls back to the dialog, visibly", async () => {

@@ -8,6 +8,7 @@ import {
   bridgePlan,
   createCleanupLedger,
   isDeepLink,
+  locateRefusalOf,
   locateRequestOf,
   resolveOpenPlan,
   tabById,
@@ -68,7 +69,7 @@ interface ZoteroTabsAPI {
   _tabs?: Array<{ id?: string; container?: unknown }>;
 }
 
-/** One tab this host opened, with the two actions its host offers. */
+/** One tab this host opened, and what it takes to host or release it. */
 interface OpenedTab {
   iframe: HTMLIFrameElement;
   /** Bring the hosting tab or window to the front; best effort. */
@@ -158,6 +159,13 @@ function buildHost(win: Window): TabHost {
       const request = locateRequestOf(detail);
       if (request) {
         openTab(win, request.tab, { paper: request.paper });
+        return;
+      }
+      // A payload that cannot be turned into a paper id must be visible: the
+      // user clicked a badge and expects the 谱系 tab to open at that item.
+      const refusal = locateRefusalOf(detail);
+      if (refusal) {
+        report(new Error(refusal), "谱系定位");
       }
     }),
   );

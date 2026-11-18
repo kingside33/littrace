@@ -304,9 +304,44 @@ export function resolveOpenPlan(preferred, options = {}) {
 }
 
 /**
+ * Why a locate payload could not be turned into a tab target, or null when
+ * it can. Kept separate from locateRequestOf so the caller can log the
+ * refusal: silently ignoring a click is exactly the "点了没反应" state this
+ * repository treats as a defect.
+ */
+export function locateRefusalOf(detail) {
+  if (locateRequestOf(detail)) {
+    return null;
+  }
+  if (!detail || typeof detail !== "object") {
+    return "定位事件缺少载荷";
+  }
+  const itemKey =
+    typeof detail.itemKey === "string" ? detail.itemKey.trim() : "";
+  if (!itemKey) {
+    return "定位事件缺少条目 key";
+  }
+  return `定位事件缺少可用的 libraryID(条目 ${itemKey}),无法拼出文献标识`;
+}
+
+/**
  * Turn a `littrace:lineage-locate` payload (A2 column) into a tab target.
- * The column's contract keeps only a valid item key meaningful; anything
- * else is ignored rather than opening an unfiltered tab.
+ *
+ * The payload's `itemKey` is a **Zotero item key** (e.g. `ABCD1234`), not a
+ * littrace paper id. The service resolves `?paper=` through
+ * `Store.resolve` (kbapp/storage/store.py:155-167), which follows the aliases
+ * table (paper id / citekey / openalex_id / doi) and otherwise returns the
+ * raw string; a bare Zotero key is in no alias, so `paper_view` raises
+ * 「文献不存在」 (kbapp/web/library_api.py:9-16) and `graph_page` resolves
+ * nothing. littrace's paper id for a Zotero item is
+ * `z:<libraryID>:<zoteroKey>` (kbapp/library/sources.py:34-40), so that is
+ * what this builds, and nothing else is accepted.
+ *
+ * A payload without a usable `libraryID` is refused rather than guessed: the
+ * service defaults the missing library to 1, but guessing would silently
+ * open a different paper for group libraries, and opening an unfiltered graph
+ * would look as if the locate had worked. The caller reports the refusal;
+ * see locateRefusalOf().
  */
 export function locateRequestOf(detail) {
   if (!detail || typeof detail !== "object") {
@@ -317,5 +352,20 @@ export function locateRequestOf(detail) {
   if (!itemKey) {
     return null;
   }
-  return Object.freeze({ tab: "graph", paper: itemKey });
+  // A2 sends libraryID as a number or null; a numeric string is accepted,
+  // anything non-integral or negative is not a library id.
+  const rawLibrary = detail.libraryID;
+  const libraryID =
+    typeof rawLibrary === "number"
+      ? rawLibrary
+      : typeof rawLibrary === "string" && rawLibrary.trim()
+        ? Number(rawLibrary.trim())
+        : NaN;
+  if (!Number.isInteger(libraryID) || libraryID < 0) {
+    return null;
+  }
+  return Object.freeze({
+    tab: "graph",
+    paper: `z:${libraryID}:${itemKey}`,
+  });
 }

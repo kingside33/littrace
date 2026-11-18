@@ -59,6 +59,7 @@ export interface LocateRequest {
   paper: string;
 }
 
+
 export declare const TAB_REGISTRY: readonly TabEntry[];
 export declare const TAB_IDS: readonly TabId[];
 export declare const TAB_BUILDERS: readonly string[];
@@ -86,3 +87,4 @@ export declare function resolveOpenPlan(
   options?: { zoteroTabsAvailable?: boolean },
 ): OpenPlan;
 export declare function locateRequestOf(detail: unknown): LocateRequest | null;
+export declare function locateRefusalOf(detail: unknown): string | null;
