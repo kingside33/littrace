@@ -73,6 +73,16 @@ export declare const PAPER_CACHE_DEFAULTS: {
   maxEntries: number;
 };
 export declare const DEFAULT_MAX_CONCURRENT_REQUESTS: number;
+export declare const COLUMN_DATA_KEYS: readonly string[];
+
+export type RepaintStrategy = "sort" | "refresh" | "none";
+
+/**
+ * Which update an item tree needs after new answers arrived: "sort" when it
+ * is sorted by one of our columns, "refresh" otherwise, "none" when it
+ * exposes neither entry point.
+ */
+export declare function repaintStrategy(view: any): RepaintStrategy;
 export declare const READING_STATES: readonly ReadingState[];
 
 export declare function paperKeyOf(libraryID: unknown, itemKey: unknown): string;

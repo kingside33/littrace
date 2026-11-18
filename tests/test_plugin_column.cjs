@@ -670,10 +670,24 @@ test("the column is wired through the plugin's single registration entry", () =>
   assert.match(shutdown, /unregisterAll\(\)/, "disable/uninstall still reclaims the columns");
   assert.match(shutdown, /resetPaperData\(\)/, "shutdown drops the per-paper cache");
 
+  // Finding 2 (PR #29): the repaint must re-sort when our column is the sort
+  // field, because refresh() cannot re-order existing rows.
   const paperData = fs.readFileSync(
     path.join(PLUGIN_DIR, "src", "columns", "paperData.ts"),
     "utf8",
   );
+  assert.match(
+    paperData,
+    /repaintStrategy\(view\)/,
+    "the repaint strategy comes from the tested core",
+  );
+  assert.match(paperData, /strategy === "sort"[\s\S]*?view\.sort\(\)/, "sort branch calls view.sort()");
+  assert.match(
+    paperData,
+    /strategy === "refresh"[\s\S]*?view\.refreshAndMaintainSelection\(\)/,
+    "refresh branch keeps the plain repaint",
+  );
+
   // Finding 1 (PR #29): the column must read the read-only v2 endpoint and the
   // request queue must be bounded.
   assert.match(
@@ -1114,6 +1128,75 @@ test("a queued paper that another request already filled is not fetched again", 
   await tick();
   assert.equal(issued, 1, "the already-filled paper is skipped, not re-requested");
   assert.equal(providers.lineageProvider(item("QUEUE002"), "lineage"), "1 已确认 · 0 待核 · 0 缺口");
+});
+
+test("a tree sorted by our column is re-sorted, not merely refreshed", async () => {
+  const data = await loadDataCore();
+  // The bug this pins: the sort happens while the cache is empty, so every
+  // key is "" and itemTree.jsx `_compareField` (default branch ->
+  // compareString(1, "", "")) returns 0 for every pair — rows keep their old
+  // order while the header shows the arrow. A later refresh cannot fix it:
+  // `refresh()` -> `_refresh()` only re-sorts newly added rows
+  // (`_sort([...addedItemIDs])`), and a repaint adds none. Only `sort()` with
+  // no argument re-compares every row (itemTree.jsx sort(itemIDs) ->
+  // rowProvider.sort(undefined) -> _rows.sort(_compareRows)).
+  const sortedByLineage = {
+    getSortFields: () => ["lineage", "firstCreator", "date"],
+    sort: () => Promise.resolve(),
+    refreshAndMaintainSelection: () => {},
+  };
+  assert.equal(data.repaintStrategy(sortedByLineage), "sort");
+  assert.equal(
+    data.repaintStrategy({ ...sortedByLineage, getSortFields: () => ["reading"] }),
+    "sort",
+    "「精读」 sorts by its own dataKey",
+  );
+
+  // Any other sort field: a refresh is enough and cheaper than a full sort.
+  assert.equal(
+    data.repaintStrategy({ ...sortedByLineage, getSortFields: () => ["title", "date"] }),
+    "refresh",
+  );
+  assert.equal(
+    data.repaintStrategy({ ...sortedByLineage, getSortFields: () => [] }),
+    "refresh",
+    "an empty sort list is not sorted by us",
+  );
+
+  // A view that cannot sort still refreshes; one that can do neither is a no-op.
+  assert.equal(
+    data.repaintStrategy({
+      getSortFields: () => ["lineage"],
+      refreshAndMaintainSelection: () => {},
+    }),
+    "refresh",
+    "without sort() we must not claim to re-order",
+  );
+  for (const view of [null, undefined, {}, 0, "view"]) {
+    assert.equal(data.repaintStrategy(view), "none", `no entry point on ${JSON.stringify(view)}`);
+  }
+  assert.equal(
+    data.repaintStrategy({
+      getSortFields: () => {
+        throw new Error("view torn down");
+      },
+      refreshAndMaintainSelection: () => {},
+    }),
+    "refresh",
+    "a throwing getSortFields must not escape",
+  );
+  assert.equal(
+    data.repaintStrategy({ getSortFields: () => "lineage", refreshAndMaintainSelection: () => {} }),
+    "refresh",
+    "a non-array sort list is ignored",
+  );
+
+  // The dataKeys are the ones the columns actually register.
+  const core = await loadCore();
+  assert.deepEqual([...data.COLUMN_DATA_KEYS], [
+    core.LINEAGE_COLUMN_DATA_KEY,
+    core.READING_COLUMN_DATA_KEY,
+  ]);
 });
 
 test("an update hook fires once per successful answer, never on failure", async () => {

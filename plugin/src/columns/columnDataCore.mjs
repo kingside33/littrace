@@ -377,6 +377,56 @@ export function createPaperCache(options = {}) {
   };
 }
 
+/** The dataKeys the two columns own; a sort on either is ours to re-run. */
+export const COLUMN_DATA_KEYS = Object.freeze(["lineage", "reading"]);
+
+/**
+ * Which update an item tree needs after new answers arrived.
+ *
+ * `"sort"` when the tree is currently sorted by one of our columns, `"refresh"`
+ * otherwise, and `"none"` when the tree exposes neither entry point.
+ *
+ * Why this is a decision and not a one-liner: a sort on our column happens
+ * while the cache is empty, so every key is `""` and `_compareField`'s default
+ * branch (`compareString(1, "", "")`, itemTree.jsx) returns 0 for every pair —
+ * the rows keep their old order while the header shows the arrow. Loading data
+ * afterwards must re-run the comparison, and a plain
+ * `refreshAndMaintainSelection()` cannot: it goes through `refresh()` ->
+ * the row provider's `_refresh()`, which only re-sorts newly added rows
+ * (`_sort([...addedItemIDs])`), and a repaint adds none. `sort()` with no
+ * argument re-compares every row (itemTree.jsx `sort(itemIDs)` ->
+ * `rowProvider.sort(undefined)` -> `_rows.sort(_compareRows)`), and it also
+ * invalidates the tree through its `update` listener, so it repaints too.
+ *
+ * Written as a pure function over the view so tests can pin the decision
+ * without a DOM.
+ */
+export function repaintStrategy(view) {
+  if (!view || typeof view !== "object") {
+    return "none";
+  }
+  if (typeof view.getSortFields === "function") {
+    let fields;
+    try {
+      fields = view.getSortFields();
+    } catch {
+      fields = null;
+    }
+    if (
+      Array.isArray(fields) &&
+      fields.some((field) => COLUMN_DATA_KEYS.includes(field)) &&
+      typeof view.sort === "function"
+    ) {
+      // Sorting by our column: re-compare, which also repaints.
+      return "sort";
+    }
+  }
+  if (typeof view.refreshAndMaintainSelection === "function") {
+    return "refresh";
+  }
+  return "none";
+}
+
 /**
  * Build the two synchronous dataProviders over one shared cache.
  *

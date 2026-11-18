@@ -2,6 +2,7 @@ import {
   createPaperDataProviders,
   DEFAULT_MAX_CONCURRENT_REQUESTS,
   paperPath,
+  repaintStrategy,
 } from "./columnDataCore.mjs";
 import type { PaperDataProviders } from "./columnDataCore.mjs";
 import { serviceClient } from "../service-client";
@@ -35,10 +36,14 @@ let repaintTimer: ReturnType<typeof setTimeout> | null = null;
 /**
  * Repaint every open main window's item tree, once per burst.
  *
- * Wrapped in typeof checks and try/catch on purpose: a repaint is an
- * optimisation, and a Zotero build without one of these entry points must
- * degrade to "the column updates on the next natural repaint", never to an
- * exception thrown out of a dataProvider.
+ * The strategy comes from `repaintStrategy()` in the tested core: re-sort
+ * when the tree is sorted by one of our columns (a plain refresh cannot
+ * re-order existing rows — see that function's comment), refresh otherwise.
+ * Every call is guarded — a repaint is an optimisation, and a Zotero build
+ * without one of these entry points must degrade to "the column updates on
+ * the next natural repaint", never to an exception thrown out of a
+ * dataProvider. The exact effect of these calls is part of the 真机
+ * acceptance list (issue #27); unit tests pin the decision, not the DOM.
  */
 function scheduleRepaint(): void {
   if (repaintTimer !== null) {
@@ -51,7 +56,20 @@ function scheduleRepaint(): void {
         typeof Zotero.getMainWindows === "function" ? Zotero.getMainWindows() : [];
       for (const win of windows) {
         const view = win?.ZoteroPane?.itemsView ?? win?.ZoteroPane_Local?.itemsView;
-        if (view && typeof view.refreshAndMaintainSelection === "function") {
+        const strategy = repaintStrategy(view);
+        if (strategy === "sort") {
+          // `sort()` is async in Zotero 7+; a rejection must not escape a timer.
+          const sorted = view.sort();
+          if (sorted && typeof sorted.catch === "function") {
+            sorted.catch((error: unknown) => {
+              Zotero.logError(
+                error instanceof Error
+                  ? error
+                  : new Error(`littrace: 条目列表重排失败: ${String(error)}`),
+              );
+            });
+          }
+        } else if (strategy === "refresh") {
           view.refreshAndMaintainSelection();
         }
       }
