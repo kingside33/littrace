@@ -1133,11 +1133,15 @@ function appendPanelHost(doc: Document, root: HTMLElement, plan: CarrierPlan): v
  *
  * A reader tab is opened for an attachment (usually a PDF) whose parent is the
  * library paper. The service names a library paper `z:<libraryID>:<itemKey>`
- * (kbapp/library/sources.py:34-40), so the panel must ask the parent item; for
- * a standalone PDF the attachment itself is the paper. Everything here is
- * read-only and defensive: a reader whose item cannot be resolved yields an
- * empty key, and the panel then refuses lineage questions with a visible
- * message instead of querying with an empty id.
+ * using the *bibliographic item* (kbapp/library/sources.py:34-40); attachments
+ * are never papers — `NON_PAPER_TYPES` skips them at load
+ * (kbapp/integrations/zotero.py:7,57) and `fill_attachments` only walks
+ * attachments that have a parent (:118). So an item with no parent yields no
+ * paper id, and the panel refuses lineage questions with a visible reason
+ * rather than asking the service about a key it cannot resolve.
+ *
+ * Everything here is read-only and defensive: a reader whose item cannot be
+ * resolved yields empty values, never a guess.
  */
 function identityOfReader(reader: unknown): {
   itemKey: string;

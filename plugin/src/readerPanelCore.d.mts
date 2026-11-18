@@ -350,6 +350,13 @@ export function jumpPlan(
   options?: { bridgeAvailable?: boolean },
 ): JumpPlan;
 export function settingsUrl(baseUrl: string | null | undefined): string | null;
+/**
+ * The library paper behind a reader's item: its PARENT item only.
+ *
+ * Returns "" when there is no parent (a standalone/attachment item, which the
+ * service never indexes as a paper: kbapp/integrations/zotero.py:7,57) or when
+ * the library id is not a positive integer. Never guesses a library.
+ */
 export function paperKeyOf(identity: {
   readonly itemKey?: string;
   readonly libraryId?: number | null;

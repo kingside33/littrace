@@ -1385,24 +1385,33 @@ export function settingsUrl(baseUrl) {
 /**
  * 当前 PDF 的文献标识 `z:<libraryID>:<itemKey>`。
  *
- * 与 kbapp/library/sources.py:34-40 的 identity 同一口径：优先用父条目
- * （PDF 附件挂在论文条目下），独立 PDF 退回附件自身。
+ * 与服务端 identity()（kbapp/library/sources.py:34-40）同一口径，但**只接受
+ * 父条目**：服务端的 papers 表里只有文献条目，附件永远不是论文——
+ * `NON_PAPER_TYPES = {'attachment', 'note', 'annotation'}` 在 load_items 里
+ * 直接 continue（kbapp/integrations/zotero.py:7,57），而 fill_attachments 只
+ * 处理 `parentItemID IS NOT NULL` 的附件（:118）。所以拿 PDF 附件自身的 key
+ * 拼出来的 `z:<lib>:<附件key>` 一定解析不到。
  *
- * 库号必须是**正整数**才拼得出来。缺 key、或库号不是正整数（`null`、0、
- * 负数、NaN）一律返回空串，由调用方给「无法识别当前文献」——绝不猜库号：
- * ADR 0028 否决过「缺失时默认 1」，因为群组库下会静默定位到另一篇文献，
- * 而 `z:0:X` 更是服务端根本不存在的 id（会表现为「这篇文献还没有进入方法
- * 谱系」这种听起来像已确认事实的误报）。`Number(null) === 0` 是本函数
- * 最容易踩的坑，所以判断写成 `Number.isInteger && > 0` 而不是 `>= 0`。
+ * 父条目缺失时返回空串，由调用方给「无法识别当前文献」。这是诚实的拒绝：
+ * 与其发一个必然查不到的身份、再显示「这篇文献还没有进入方法谱系」（听起来
+ * 像已确认的事实，实际是没查到），不如直接说识别不了。
+ *
+ * 库号必须是正整数才拼得出来；缺 key、或库号不可知（`null`、0、负数、NaN）
+ * 一律返回空串，**绝不猜库号**：ADR 0028 否决过「缺失时默认 1」，因为群组库
+ * 下会静默定位到另一篇文献，而 `z:0:X` 更是服务端不存在的 id。
+ * `Number(null) === 0` 是本函数最容易踩的坑，所以判断写成
+ * `Number.isInteger && > 0` 而不是 `>= 0`。
  */
 export function paperKeyOf(identity) {
   const record = recordOf(identity);
   const parentKey = textOf(record.parentKey);
-  const key = parentKey || textOf(record.itemKey);
-  if (!key) {
+  if (!parentKey) {
+    // No parent means the reader is showing something that is not a library
+    // paper (a standalone/attachment item); the attachment's own key is not a
+    // paper id on the service side.
     return "";
   }
-  const raw = parentKey ? (record.parentLibraryId ?? record.libraryId) : record.libraryId;
+  const raw = record.parentLibraryId ?? record.libraryId;
   if (raw === null || raw === undefined || raw === "") {
     return "";
   }
@@ -1410,7 +1419,7 @@ export function paperKeyOf(identity) {
   if (!Number.isInteger(libraryID) || libraryID <= 0) {
     return "";
   }
-  return `z:${libraryID}:${key}`;
+  return `z:${libraryID}:${parentKey}`;
 }
 
 /**

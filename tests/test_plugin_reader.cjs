@@ -1308,14 +1308,27 @@ test("the attachment key names the paper, and a missing key names nothing", asyn
     "z:1:PAPER1",
     "a PDF's paper is its parent item (kbapp/library/sources.py:34-40)",
   );
-  assert.equal(
-    mod.paperKeyOf({ itemKey: "SOLO001", libraryId: 3 }),
-    "z:3:SOLO001",
-    "a standalone PDF is its own paper",
-  );
-  assert.equal(mod.paperKeyOf({ itemKey: "X", libraryId: 7 }), "z:7:X");
+  assert.equal(mod.paperKeyOf({ itemKey: "X", libraryId: 7, parentKey: "P" }), "z:7:P");
   assert.equal(mod.paperKeyOf({}), "", "no item key means no paper, not z:1:");
   assert.equal(mod.paperKeyOf(null), "");
+});
+
+test("an item with no parent is not a paper, so no id is invented for it", async () => {
+  const mod = await core();
+
+  // The service never indexes an attachment as a paper: NON_PAPER_TYPES skips
+  // it (kbapp/integrations/zotero.py:7,57) and fill_attachments only walks
+  // attachments with a parent (:118). An attachment's own key therefore cannot
+  // be turned into `z:<lib>:<key>` — that id would resolve to nothing and the
+  // panel would report "not in the lineage" rather than "cannot identify".
+  assert.equal(
+    mod.paperKeyOf({ itemKey: "SOLO001", libraryId: 3 }),
+    "",
+    "a standalone attachment is not itself a library paper",
+  );
+  const blocked = mod.lineageRequest(mod.paperKeyOf({ itemKey: "SOLO001", libraryId: 3 }));
+  assert.equal(blocked.kind, "blocked");
+  assert.match(blocked.message, /无法识别当前文献/);
 });
 
 test("an unknown library is refused, never guessed (ADR 0028)", async () => {
@@ -1323,12 +1336,16 @@ test("an unknown library is refused, never guessed (ADR 0028)", async () => {
 
   // `Number(null) === 0` and `Number.isInteger(0)` is true: the naive check
   // produced the non-existent id `z:0:X`, which the service cannot resolve.
-  assert.equal(mod.paperKeyOf({ itemKey: "X", libraryId: null }), "");
-  assert.equal(mod.paperKeyOf({ itemKey: "X", libraryId: 0 }), "", "library 0 is not a library");
-  assert.equal(mod.paperKeyOf({ itemKey: "X", libraryId: -1 }), "");
-  assert.equal(mod.paperKeyOf({ itemKey: "X", libraryId: "abc" }), "");
+  assert.equal(mod.paperKeyOf({ itemKey: "X", libraryId: null, parentKey: "P" }), "");
   assert.equal(
-    mod.paperKeyOf({ itemKey: "X" }),
+    mod.paperKeyOf({ itemKey: "X", libraryId: 0, parentKey: "P" }),
+    "",
+    "library 0 is not a library",
+  );
+  assert.equal(mod.paperKeyOf({ itemKey: "X", libraryId: -1, parentKey: "P" }), "");
+  assert.equal(mod.paperKeyOf({ itemKey: "X", libraryId: "abc", parentKey: "P" }), "");
+  assert.equal(
+    mod.paperKeyOf({ itemKey: "X", parentKey: "P" }),
     "",
     "a missing library must not silently become library 1",
   );
@@ -1345,7 +1362,7 @@ test("an unknown library is refused, never guessed (ADR 0028)", async () => {
 
   // The end-to-end consequence: an unknown library makes lineage refuse with a
   // visible reason instead of querying an id that cannot exist.
-  const blocked = mod.lineageRequest(mod.paperKeyOf({ itemKey: "X", libraryId: null }));
+  const blocked = mod.lineageRequest(mod.paperKeyOf({ itemKey: "X", libraryId: null, parentKey: "P" }));
   assert.equal(blocked.kind, "blocked");
   assert.match(blocked.message, /无法识别当前文献/);
 });
