@@ -5,7 +5,7 @@
 
 ## 背景
 
-评审 PR #36 的 finding(`plugin/src/prefs/service-client.ts:107`):共享客户端缓存
+评审 PR #36 的 finding(`plugin/src/service-client.ts:108`):共享客户端缓存
 的不只是 URL,还包括**整个生命周期的会话令牌**——它在构造时就把 `baseUrl` 钉死
 (`createClient()`,`plugin/src/service-client.ts:102-111`)。
 
