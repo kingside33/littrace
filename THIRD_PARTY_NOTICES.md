@@ -102,6 +102,18 @@ This is one of the reasons littrace is AGPL-3.0-only rather than a permissive
 licence. The commercial-licence path for littrace itself does not change
 Artifex's terms, and this notice does not grant any right under them.
 
+## Zotero plugin skeleton
+
+`plugin/` is bootstrapped from the [zotero-plugin-template](https://github.com/windingwind/zotero-plugin-template)
+repository, licensed under AGPL-3.0-or-later. That licence permits
+redistribution under AGPL-3.0, which is what littrace uses. The adapted files
+are `plugin/addon/bootstrap.js` (which additionally states in its header that
+most of its code comes from the Zotero team's Make It Red example and the
+Zotero 7 developer documentation), `plugin/zotero-plugin.config.ts`,
+`plugin/tsconfig.json` and `plugin/.gitignore`; the rest of `plugin/` is
+written for littrace. The npm dev dependencies (zotero-plugin-scaffold,
+typescript) are build tooling only and are not distributed inside the XPI.
+
 ## Dependencies
 
 | Package | Version range in `requirements.txt` | Licence expression observed |

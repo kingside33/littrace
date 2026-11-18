@@ -1,0 +1,27 @@
+{
+  "name": "littrace-plugin",
+  "type": "module",
+  "private": true,
+  "version": "0.1.0",
+  "description": "littrace Zotero plugin",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kingside33/littrace.git"
+  },
+  "config": {
+    "addonName": "littrace",
+    "addonID": "littrace@example.invalid",
+    "addonRef": "littrace",
+    "addonInstance": "Littrace",
+    "prefsPrefix": "extensions.zotero.littrace"
+  },
+  "scripts": {
+    "start": "zotero-plugin serve",
+    "build": "zotero-plugin build && tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "zotero-plugin-scaffold": "^0.9.4"
+  }
+}
