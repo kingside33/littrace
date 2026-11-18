@@ -21,6 +21,7 @@ import {
   entryStateOf,
   guideView,
   GUIDE_STATUS_KEYS,
+  labelKeyOf,
   menuSpecs,
   paperIdOf,
   registeredEntries,
@@ -190,17 +191,27 @@ function safeSet(context: any, name: string, value: boolean): void {
  *
  * `l10nID` alone relies on the window's Fluent overlay resolving the plugin's
  * bundle; painting the same message from `t()` guarantees a visible label even
- * when that overlay has not loaded the resource yet, and it can never differ
- * from the l10nID text because both come from the same message. Menus are
- * rebuilt on every open, so a locale switch is picked up on the next open.
+ * when that overlay has not loaded the resource yet. When an entry's label
+ * key changes with the service state (the guide entry), the element's
+ * `data-l10n-id` is updated too, so a later overlay pass cannot replace the
+ * label with the other variant. Both sources are the same Fluent message, so
+ * they can never disagree.
  */
-function paintElement(menuElem: any, label: string, reason = ""): void {
+function paintElement(
+  menuElem: any,
+  label: string,
+  reason = "",
+  l10nID = "",
+): void {
   if (!menuElem || typeof menuElem.setAttribute !== "function") {
     return;
   }
   try {
     menuElem.setAttribute("label", label);
     menuElem.setAttribute("tooltiptext", reason ? `${label} — ${reason}` : label);
+    if (l10nID) {
+      menuElem.setAttribute("data-l10n-id", l10nID);
+    }
   } catch {
     // 元素已销毁: 没有 label/tooltip 可设置。
   }
@@ -212,13 +223,16 @@ function paintElement(menuElem: any, label: string, reason = ""): void {
  * and a silently greyed entry is indistinguishable from a broken one.
  */
 function applyEntryState(entry: MenuEntry, context: any): void {
-  const state = entryStateOf(entry, menuInput(context?.items));
+  const input = menuInput(context?.items);
+  const state = entryStateOf(entry, input);
   safeSet(context, "setEnabled", state.enabled);
   safeSet(context, "setVisible", state.visible);
+  const labelKey = labelKeyOf(entry, input.service as MenuServiceState);
   paintElement(
     context?.menuElem,
-    t(entry.labelKey),
+    t(labelKey),
     state.reasonKey ? t(state.reasonKey) : "",
+    ftlId(labelKey),
   );
 }
 

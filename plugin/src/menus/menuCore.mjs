@@ -208,11 +208,13 @@ export const MENU_ENTRIES = Object.freeze([
   }),
   // The one always-clickable entry while offline. It is the guide card's door:
   // disabled entries cannot be clicked, so the explanation needs a neighbour
-  // that stays enabled (same rule as U5's 「服务诊断」).
+  // that stays enabled (same rule as U5's 「服务诊断」). `incompatibleLabelKey`
+  // keeps the menu from claiming 「未运行」 about a service that did answer.
   Object.freeze({
     id: "item-guide",
     group: "item",
     labelKey: "menu-item-guide",
+    incompatibleLabelKey: "menu-item-guide-incompatible",
     command: "guide",
     menuType: "menuitem",
     needsService: false,
@@ -268,6 +270,7 @@ export const MENU_ENTRIES = Object.freeze([
     id: "tools-guide",
     group: "tools",
     labelKey: "menu-item-guide",
+    incompatibleLabelKey: "menu-item-guide-incompatible",
     command: "guide",
     menuType: "menuitem",
     needsService: false,
@@ -664,6 +667,25 @@ export function entryStateOf(entry, context) {
   });
 }
 
+/**
+ * The label to render for one entry in this service state.
+ *
+ * Only the guide entry varies: 「本地服务未运行」 is false for a service that
+ * did answer with an incompatible version, and the menu row and the card it
+ * opens must not contradict each other. Every other entry keeps its static key.
+ */
+export function labelKeyOf(entry, service) {
+  if (
+    entry &&
+    typeof entry.incompatibleLabelKey === "string" &&
+    entry.incompatibleLabelKey.length > 0 &&
+    service === SERVICE_STATES.INCOMPATIBLE
+  ) {
+    return entry.incompatibleLabelKey;
+  }
+  return entry.labelKey;
+}
+
 /** Every registered entry of one group, with its state. */
 export function menuStates(groupId, context = {}) {
   const ctx = menuContext(context);
@@ -711,6 +733,9 @@ export function menuSpecs() {
  */
 export const GUIDE_CARD = Object.freeze({
   titleKey: "menu-guide-title",
+  // Same reason as the guide entry's incompatible label: a service that
+  // answered is not 「未运行」, and the card must not say so.
+  incompatibleTitleKey: "menu-guide-title-incompatible",
   bodyKeys: Object.freeze([
     "menu-guide-body-offline",
     "menu-guide-body-start",
@@ -741,15 +766,14 @@ export const GUIDE_STATUS_KEYS = Object.freeze({
  */
 export function guideView(context = {}) {
   const ctx = menuContext(context);
+  const incompatible = ctx.service === SERVICE_STATES.INCOMPATIBLE;
   const bodyKeys = Object.freeze([
-    ctx.service === SERVICE_STATES.INCOMPATIBLE
-      ? GUIDE_CARD.incompatibleKey
-      : GUIDE_CARD.bodyKeys[0],
+    incompatible ? GUIDE_CARD.incompatibleKey : GUIDE_CARD.bodyKeys[0],
     ...GUIDE_CARD.bodyKeys.slice(1),
   ]);
   return Object.freeze({
     service: ctx.service,
-    titleKey: GUIDE_CARD.titleKey,
+    titleKey: incompatible ? GUIDE_CARD.incompatibleTitleKey : GUIDE_CARD.titleKey,
     bodyKeys,
     actions: GUIDE_CARD.actions,
   });
@@ -813,6 +837,9 @@ export function menuFluentKeys() {
   }
   for (const entry of MENU_ENTRIES) {
     keys.add(entry.labelKey);
+    if (entry.incompatibleLabelKey) {
+      keys.add(entry.incompatibleLabelKey);
+    }
     if (entry.blockedReasonKey) {
       keys.add(entry.blockedReasonKey);
     }
@@ -821,6 +848,7 @@ export function menuFluentKeys() {
     keys.add(key);
   }
   keys.add(GUIDE_CARD.titleKey);
+  keys.add(GUIDE_CARD.incompatibleTitleKey);
   for (const key of GUIDE_CARD.bodyKeys) {
     keys.add(key);
   }

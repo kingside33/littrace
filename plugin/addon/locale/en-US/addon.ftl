@@ -180,6 +180,7 @@ menu-item-open-graph = Open the research lineage tab
 menu-item-open-offline-graph = Open the offline graph
 menu-item-diagnostics = Service diagnostics
 menu-item-guide = Local service is not running — see how to start it
+menu-item-guide-incompatible = Local service version is not compatible — see what to do
 menu-gate-checking = checking the local service
 menu-gate-offline = the local service is not running
 menu-gate-incompatible = the local service version is not compatible
@@ -191,6 +192,7 @@ menu-blocked-offline-graph = the offline-graph entry waits for a read-only servi
 
 # Offline guide card. The size/time budget mirrors the first-run note.
 menu-guide-title = The littrace local service is not running
+menu-guide-title-incompatible = The littrace local service version is not compatible
 menu-guide-body-offline = These entries are served by the littrace local service on this machine. The plugin bundles no service, and it never offers half a result while the service is offline.
 menu-guide-body-incompatible = The local littrace service answers, but its version is not compatible with this plugin. Update the service, then press 「Recheck」.
 menu-guide-body-start = To start it: run python kb.py serve in the littrace project directory, then press 「Recheck」 in Zotero.

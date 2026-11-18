@@ -493,6 +493,31 @@ test("the guide card carries the volume/time budget and every action", async () 
     incompatible.bodyKeys.slice(1),
     core.GUIDE_CARD.bodyKeys.slice(1),
   );
+  // A service that answered is not 「未运行」: the card title and the guide
+  // menu row must not claim it is, or the card's own first line contradicts
+  // the title above it.
+  assert.equal(incompatible.titleKey, core.GUIDE_CARD.incompatibleTitleKey);
+  const offlineView = core.guideView({ health: OFFLINE });
+  assert.equal(offlineView.titleKey, core.GUIDE_CARD.titleKey);
+
+  const guideEntry = core.MENU_ENTRIES.find((entry) => entry.id === "item-guide");
+  assert.equal(core.labelKeyOf(guideEntry, "offline"), "menu-item-guide");
+  assert.equal(core.labelKeyOf(guideEntry, "checking"), "menu-item-guide");
+  assert.equal(
+    core.labelKeyOf(guideEntry, "incompatible"),
+    "menu-item-guide-incompatible",
+  );
+  assert.equal(core.labelKeyOf(guideEntry, "online"), "menu-item-guide");
+  // Entries without an incompatible variant keep their static key.
+  const evidenceEntry = core.MENU_ENTRIES.find((entry) => entry.id === "item-evidence");
+  assert.equal(core.labelKeyOf(evidenceEntry, "incompatible"), "menu-item-evidence");
+
+  // The two incompatible strings must actually say something else than the
+  // offline ones, in both bundles.
+  assert.doesNotMatch(zh.get("menu-item-guide-incompatible"), /未运行/);
+  assert.doesNotMatch(zh.get("menu-guide-title-incompatible"), /未运行/);
+  assert.doesNotMatch(en.get("menu-item-guide-incompatible"), /not running/i);
+  assert.doesNotMatch(en.get("menu-guide-title-incompatible"), /not running/i);
 
   // The budget copy is what makes the card honest; assert it says so, in both
   // bundles, instead of trusting the key name.
@@ -608,8 +633,10 @@ test("no visible menu string is hardcoded in the TypeScript edge", () => {
   for (const match of menus.matchAll(/textContent\s*=\s*`([^`]*)`/g)) {
     assert.match(match[1], /\bt\(/, "a template literal must still resolve through t()");
   }
-  // Every visible label goes through the Fluent lookup.
-  assert.match(menus, /t\(entry\.labelKey\)/);
+  // Every visible label goes through the Fluent lookup, and the guide entry's
+  // label is chosen per service state (offline vs incompatible).
+  assert.match(menus, /labelKeyOf\(entry, input\.service as MenuServiceState\)/);
+  assert.match(menus, /t\(labelKey\)/);
   assert.match(menus, /t\(view\.titleKey\)/);
   assert.match(menus, /t\(key, args\)/);
 });

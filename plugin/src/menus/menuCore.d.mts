@@ -18,6 +18,7 @@ export type MenuEntry = {
   id: string;
   group: MenuGroupID;
   labelKey: string;
+  incompatibleLabelKey?: string;
   command: string;
   menuType: "menuitem";
   needsService: boolean;
@@ -142,6 +143,7 @@ export const EMPTY_COMPARE_SET: CompareSet;
 export const EMPTY_SELECTION: SelectionCount;
 export const GUIDE_CARD: Readonly<{
   titleKey: string;
+  incompatibleTitleKey: string;
   bodyKeys: ReadonlyArray<string>;
   incompatibleKey: string;
   actions: ReadonlyArray<GuideAction>;
@@ -184,6 +186,7 @@ export declare function entryStateOf(
   entry: MenuEntry,
   context: MenuContext | MenuContextInput,
 ): EntryState;
+export declare function labelKeyOf(entry: MenuEntry, service: MenuServiceState): string;
 export declare function registeredEntries(groupId?: MenuGroupID | null): MenuEntry[];
 export declare function menuStates(
   groupId: MenuGroupID,

@@ -176,6 +176,7 @@ menu-item-open-graph = 打开研究谱系 tab
 menu-item-open-offline-graph = 打开离线图谱
 menu-item-diagnostics = 服务诊断
 menu-item-guide = 本地服务未运行 — 查看启动引导
+menu-item-guide-incompatible = 本地服务版本不兼容 — 查看处理引导
 menu-gate-checking = 正在检查本地服务
 menu-gate-offline = 本地服务未运行
 menu-gate-incompatible = 本地服务版本不兼容
@@ -187,6 +188,7 @@ menu-blocked-offline-graph = 离线图谱入口等待服务端提供只读路由
 
 # 离线降级引导卡。体积与时长预算来自首次使用说明,措辞保持一致。
 menu-guide-title = littrace 本地服务未运行
+menu-guide-title-incompatible = littrace 本地服务版本不兼容
 menu-guide-body-offline = 这些入口都由本机的 littrace 本地服务提供;插件本身不内置服务,服务离线时也不给出半成品结果。
 menu-guide-body-incompatible = 本机 littrace 服务可以连接,但版本与本插件不兼容。请更新本地服务后点「重新检查」。
 menu-guide-body-start = 启动方式:在 littrace 项目目录运行 python kb.py serve,然后回到 Zotero 点「重新检查」。
