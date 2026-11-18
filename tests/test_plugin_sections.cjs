@@ -705,6 +705,22 @@ test("a same-item repaint does not clear the DOM (sidenav reorder leaves it blan
   assert.match(bind, /mount\.body\.replaceChildren\(\)/);
 });
 
+test("mounts are keyed by document, so one window cannot clobber another", () => {
+  const source = fs.readFileSync(SECTIONS_TS, "utf8");
+  // Sections register once per process but each main window has its own
+  // item-pane-custom-section element with its own doc/body. Keying by
+  // sectionID alone let window 2's onItemChange clear window 1's DOM.
+  assert.match(source, /const mounts = new Map<Document, Map<SectionID, SectionMount>>\(\)/);
+  assert.match(source, /function mountsFor\(doc: Document\)/);
+  assert.match(source, /function mountIn\(doc: Document, sectionID: SectionID\)/);
+  // Both hooks must go through the document-scoped lookup.
+  const destroy = source.slice(source.indexOf("onDestroy({ doc }"), source.indexOf("onItemChange({"));
+  assert.match(destroy, /dropMount\(doc, sectionID\)/, "onDestroy only drops this window's mount");
+  const change = source.slice(source.indexOf("onItemChange({"), source.indexOf("onRender({ doc, body, item }"));
+  assert.match(change, /mountIn\(doc, sectionID\)/, "onItemChange only touches this window's mount");
+  assert.ok(!/mounts\.get\(sectionID\)/.test(source), "no section-only lookup may remain");
+});
+
 test("the async fill guards on both the cache key and the render generation", () => {
   const source = fs.readFileSync(SECTIONS_TS, "utf8");
   const paint = source.slice(source.indexOf("async function paintSection("));

@@ -493,7 +493,39 @@ async function paintSection(
 
 /* ── Registration ────────────────────────────────────────────────────── */
 
-const mounts = new Map<string, SectionMount>();
+/**
+ * Mounts are keyed by **(document, section)**, not by section alone.
+ *
+ * The sections are registered once per process (ItemPaneManager has one
+ * registry) but every Zotero main window instantiates its own
+ * `item-pane-custom-section` element, with its own `doc`/`body`
+ * (itemDetails.js renderCustomSections, per window). Keying by section only
+ * meant the second window's `onItemChange` reached the *first* window's mount:
+ * it cleared that window's DOM, re-bound its cache key to the other window's
+ * item, and — because Zotero skips `render()` when `[tabID, item.id]` are
+ * unchanged — left that pane blank until its item changed again. `onDestroy`
+ * had the same problem in reverse, disposing another window's mount and
+ * discarding its in-flight result.
+ *
+ * `doc` identifies the window's pane; `body` is the section's own container
+ * inside it (re-checked so a re-created element in the same document is not
+ * mistaken for the old one).
+ */
+const mounts = new Map<Document, Map<SectionID, SectionMount>>();
+
+function mountsFor(doc: Document): Map<SectionID, SectionMount> {
+  let bySection = mounts.get(doc);
+  if (!bySection) {
+    bySection = new Map<SectionID, SectionMount>();
+    mounts.set(doc, bySection);
+  }
+  return bySection;
+}
+
+/** The mount bound to this section in *this* document, if any. */
+function mountIn(doc: Document, sectionID: SectionID): SectionMount | null {
+  return mounts.get(doc)?.get(sectionID) ?? null;
+}
 
 function mountFor(
   sectionID: SectionID,
@@ -508,8 +540,21 @@ function mountFor(
     generation: createRenderGeneration(),
     disposed: false,
   };
-  mounts.set(sectionID, mount);
+  mountsFor(doc).set(sectionID, mount);
   return mount;
+}
+
+/** Drop one section's mount in one document (destroy, or a replaced element). */
+function dropMount(doc: Document, sectionID: SectionID): void {
+  const bySection = mounts.get(doc);
+  const mount = bySection?.get(sectionID);
+  if (mount) {
+    mount.disposed = true;
+  }
+  bySection?.delete(sectionID);
+  if (bySection && bySection.size === 0) {
+    mounts.delete(doc);
+  }
 }
 
 /**
@@ -549,29 +594,42 @@ function registerOne(sectionID: SectionID): SectionRegistration {
       onInit({ doc, body }: { doc: Document; body: HTMLElement }) {
         mountFor(sectionID, doc, body);
       },
-      onDestroy() {
-        const mount = mounts.get(sectionID);
-        if (mount) {
-          mount.disposed = true;
-          mounts.delete(sectionID);
-        }
+      onDestroy({ doc }: { doc: Document }) {
+        // Only this window's mount: other main windows keep theirs (see the
+        // mounts comment above).
+        dropMount(doc, sectionID);
       },
-      onItemChange({ item, setEnabled }: { item?: any; setEnabled: (yes: boolean) => void }) {
-        const mount = mounts.get(sectionID);
-        if (!mount) {
-          return;
-        }
+      onItemChange({
+        doc,
+        body,
+        item,
+        setEnabled,
+      }: {
+        doc: Document;
+        body: HTMLElement;
+        item?: any;
+        setEnabled: (yes: boolean) => void;
+      }) {
         // Collections / saved searches and non-library rows have no snapshot:
         // hide the section instead of asking the service about a non-paper.
         setEnabled(Boolean(cacheKeyFor(item)));
-        bindItem(mount, item);
+        const mount = mountIn(doc, sectionID);
+        if (mount) {
+          bindItem(mount, item);
+        }
       },
       // The one place a section paints. Synchronous skeleton first (official
       // JSDoc: "Cannot be async"), then the async fill from the same call, so
       // no second hook is needed and there is no path that paints twice.
       onRender({ doc, body, item }: { doc: Document; body: HTMLElement; item?: any }) {
-        let mount = mounts.get(sectionID);
-        if (!mount || mount.doc !== doc || mount.body !== body) {
+        let mount = mountIn(doc, sectionID);
+        if (mount && mount.body !== body) {
+          // The section element was re-created in the same document; the old
+          // mount points at a detached node and must not be painted into.
+          dropMount(doc, sectionID);
+          mount = null;
+        }
+        if (!mount) {
           mount = mountFor(sectionID, doc, body);
         }
         const key = cacheKeyFor(item);
@@ -603,10 +661,12 @@ export function createItemSections(): SectionRegistration[] {
   return [registerOne("evidence"), registerOne("lineage"), registerOne("reading")];
 }
 
-/** Release every mount (shutdown): the oracle-cleared pane must hold no nodes. */
+/** Release every mount (shutdown): a disabled plugin must leave no pane bound. */
 export function disposeItemSections(): void {
-  for (const mount of mounts.values()) {
-    mount.disposed = true;
+  for (const bySection of mounts.values()) {
+    for (const mount of bySection.values()) {
+      mount.disposed = true;
+    }
   }
   mounts.clear();
   resetSectionCache();
