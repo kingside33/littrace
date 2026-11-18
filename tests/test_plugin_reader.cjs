@@ -565,3 +565,86 @@ test("finding 4609678628: the in-flight marker is cleared before the outcome is 
     "a throwing outcome must be caught so the panel cannot stay busy",
   );
 });
+
+test("finding 4609683072: a refused question is visible and its input is not consumed", () => {
+  const source = fs.readFileSync(PANEL_TS, "utf8");
+
+  // run() must report whether the question started.
+  assert.match(
+    source,
+    /function run\([\s\S]*?\): boolean \{/,
+    "run must return whether it started the question, so callers can decide about the input",
+  );
+  const runBody = functionBody(source, "run");
+  assert.match(
+    runBody,
+    /return false/,
+    "a refused question reports false instead of returning silently",
+  );
+  assert.match(
+    runBody,
+    /showNotice\(mount, "reader-panel-wait"\)/,
+    "the refusal must say why -- the repository rule is no silent failure",
+  );
+
+  // The form clears the input only on success.
+  const create = functionBody(source, "createPanel");
+  const submit = create.slice(create.indexOf('form.addEventListener("submit"'));
+  assert.ok(
+    submit.indexOf("if (run(doc, mount, question, null))") !== -1,
+    "the submit handler must gate on run()'s result",
+  );
+  const clearAt = submit.indexOf('input.value = ""');
+  const runAt = submit.indexOf("run(doc, mount, question, null)");
+  assert.ok(
+    clearAt > runAt,
+    "clearing the input before run() is the reported bug: a mid-flight question vanishes",
+  );
+
+  // The selection path keeps the selected text in the input when it cannot ask.
+  const popupStart = source.indexOf("export function onRenderTextSelectionPopup(");
+  const popupEnd = source.indexOf("export function onRenderToolbar(");
+  assert.ok(popupStart !== -1 && popupEnd > popupStart, "both handlers must exist");
+  const popup = source.slice(popupStart, popupEnd);
+  assert.ok(
+    popup.indexOf("if (run(doc, mount, selection, button.action))") !== -1,
+    "the selection handler must also gate on run()'s result",
+  );
+  assert.match(
+    popup,
+    /input\.value = selection;/,
+    "a refused selection question must put the selected text somewhere visible",
+  );
+});
+
+test("finding 4609683072: the in-flight rule is visible on the form, not just enforced", () => {
+  const source = fs.readFileSync(PANEL_TS, "utf8");
+
+  assert.match(
+    source,
+    /function syncFormState\(/,
+    "the form must reflect the in-flight state",
+  );
+  const sync = functionBody(source, "syncFormState");
+  assert.match(sync, /submit\.disabled = busy/, "the submit button is disabled while asking");
+  assert.match(
+    sync,
+    /reader-panel-wait/,
+    "the placeholder must say why submission is unavailable",
+  );
+});
+
+test("the new wait message exists in both locale packs", async () => {
+  const mod = await core();
+  assert.ok(
+    mod.MESSAGE_KEYS.includes("reader-panel-wait"),
+    "the refusal message must be registered, or the panel would show a raw key",
+  );
+  for (const locale of ["en-US", "zh-CN"]) {
+    const ftl = fs.readFileSync(
+      path.join(PLUGIN_DIR, "addon", "locale", locale, "addon.ftl"),
+      "utf8",
+    );
+    assert.match(ftl, /^reader-panel-wait =/m, `${locale} is missing reader-panel-wait`);
+  }
+});

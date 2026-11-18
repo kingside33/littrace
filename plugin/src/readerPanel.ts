@@ -140,6 +140,12 @@ const STYLE = `
 }
 #${ROOT_ID} .lt-stage progress { flex: 1; height: 6px; }
 #${ROOT_ID} .lt-empty { color: var(--lt-muted); font-size: 0.9em; }
+#${ROOT_ID} .lt-notice {
+  border: 1px solid #d9c58a; border-radius: 4px;
+  background: #fdf7e3; color: #6b5b1f;
+  padding: 4px 8px; margin: 0; font-size: 0.85em;
+}
+#${ROOT_ID} form button:disabled { opacity: 0.6; }
 #${ROOT_ID} form {
   display: flex; gap: 6px; padding: 8px 10px;
   border-top: 1px solid var(--lt-line);
@@ -325,6 +331,14 @@ function paintStream(doc: Document, mount: PanelMount): void {
     ordered.push(renderEmpty(doc));
   }
 
+  // The "previous question is still running" notice is transient state, not a
+  // card, but it must survive the repaint that follows it, or the user never
+  // sees why their submission was refused.
+  const notice = stream.querySelector(".lt-notice");
+  if (notice) {
+    ordered.push(notice);
+  }
+
   // Moving an existing node keeps its state, so reusing card objects and
   // replacing the child list keeps `<details>` open and closed as they were.
   const scroll = stream.scrollTop;
@@ -363,6 +377,7 @@ function settle(
       report(nested, "reader panel failure card");
     }
   }
+  syncFormState(mount);
   paintStream(doc, mount);
 }
 
@@ -378,19 +393,24 @@ function report(error: unknown, context: string): void {
 /**
  * Ask one question and advance the stream. The panel form and both selection
  * buttons come through here, so there is exactly one flow to reason about.
+ *
+ * Returns false when a question is already in flight and this one was NOT
+ * started. The caller must then leave the user's input where it is: clearing
+ * it and returning silently is the "input vanishes with no feedback" bug this
+ * return value exists to prevent.
  */
 function run(
   doc: Document,
   mount: PanelMount,
   question: string,
   action: SelectionAction | null,
-): void {
-  if (mount.timer !== null) {
-    // One question in flight at a time: a second submit while the static
-    // stage is running would interleave two streams and prove nothing.
-    return;
+): boolean {
+  if (!canAsk(mount)) {
+    showNotice(mount, "reader-panel-wait");
+    return false;
   }
   try {
+    clearNotice(mount);
     mount.state = ask(mount.state, question, {
       source: sourceForAction(action),
     });
@@ -398,19 +418,81 @@ function run(
       labelKey: "reader-panel-stage-searching",
       progress: 35,
     });
+    syncFormState(mount);
     paintStream(doc, mount);
     mount.timer = setTimeout(() => {
       settle(doc, mount, action, question);
     }, STATIC_STAGE_MS) as unknown as number;
+    return true;
   } catch (error) {
     report(error, "reader panel question");
+    syncFormState(mount);
     paintStream(doc, mount);
+    return false;
+  }
+}
+
+/**
+ * Whether a new question may start. One question in flight at a time: two
+ * concurrent streams would interleave and the append-only contract would stop
+ * meaning anything. Callers must ASK this before consuming the user's input.
+ */
+function canAsk(mount: PanelMount): boolean {
+  return mount.timer === null;
+}
+
+/**
+ * A short visible notice for a question that could not be started.
+ *
+ * The repository rule is that a disabled entry says why and never fails
+ * quietly; refusing a second question while one is running is exactly such a
+ * state, so it gets a line in the stream rather than a silent return.
+ */
+function showNotice(mount: PanelMount, messageKey: string): void {
+  const stream = mount.root.querySelector<HTMLElement>(".lt-stream");
+  if (!stream) {
+    return;
+  }
+  const existing = stream.querySelector(".lt-notice");
+  if (existing) {
+    existing.textContent = t(messageKey);
+    return;
+  }
+  const notice = element(mount.root.ownerDocument, "p", "lt-notice");
+  notice.setAttribute("role", "alert");
+  notice.textContent = t(messageKey);
+  stream.append(notice);
+}
+
+/** Clear a stale notice: a question that did start makes the old one wrong. */
+function clearNotice(mount: PanelMount): void {
+  mount.root.querySelector(".lt-notice")?.remove();
+}
+
+/**
+ * Reflect the in-flight state on the form: while a question is running the
+ * submit button is disabled and the input says why. Together with run()'s
+ * boolean return and the notice, this is what turns "one at a time" from a
+ * silent drop into a visible state.
+ */
+function syncFormState(mount: PanelMount): void {
+  const busy = !canAsk(mount);
+  const input = mount.root.querySelector<HTMLInputElement>("form input");
+  const submit = mount.root.querySelector<HTMLButtonElement>("form button");
+  if (submit) {
+    submit.disabled = busy;
+  }
+  if (input) {
+    input.placeholder = busy
+      ? t("reader-panel-wait")
+      : t("reader-panel-placeholder");
   }
 }
 
 /** Retry a failed card: the core appends, the timer re-runs the same question. */
 function retryCard(doc: Document, mount: PanelMount, cardId: string): void {
-  if (mount.timer !== null) {
+  if (!canAsk(mount)) {
+    showNotice(mount, "reader-panel-wait");
     return;
   }
   try {
@@ -421,6 +503,11 @@ function retryCard(doc: Document, mount: PanelMount, cardId: string): void {
     }
     const action = actionForSource((fresh as { source: string }).source);
     const question = fresh.text;
+    mount.state = stage(mount.state, {
+      labelKey: "reader-panel-stage-searching",
+      progress: 35,
+    });
+    syncFormState(mount);
     paintStream(doc, mount);
     mount.timer = setTimeout(() => {
       // Keep the same static path as the original ask, including its action,
@@ -477,8 +564,13 @@ function createPanel(doc: Document, layout: string): PanelMount {
     if (!question) {
       return;
     }
-    input.value = "";
-    run(doc, mount, question, null);
+    // Only consume the input when the question actually started. Clearing it
+    // first and letting run() refuse would make a mid-flight second question
+    // disappear with no card and no message.
+    if (run(doc, mount, question, null)) {
+      input.value = "";
+    }
+    input.focus();
   });
 
   close.addEventListener("click", () => {
@@ -586,6 +678,7 @@ function openPanel(doc: Document, plan: CarrierPlan): PanelMount {
   const mount = createPanel(doc, plan.layout);
   appendPanelHost(doc, mount.root, plan);
   mounts.set(doc, mount);
+  syncFormState(mount);
   paintStream(doc, mount);
   return mount;
 }
@@ -623,13 +716,22 @@ export function onRenderTextSelectionPopup(event: {
     node.textContent = t(button.labelKey);
     node.addEventListener("click", () => {
       const mount = openPanel(doc, plan);
-      // A popup with no text still opens the panel; asking with an empty
-      // string would throw inside the core, so only ask when there is text.
-      if (selection) {
-        run(doc, mount, selection, button.action);
-      } else {
-        const input = mount.root.querySelector<HTMLInputElement>("form input");
+      const input = mount.root.querySelector<HTMLInputElement>("form input");
+      if (!selection) {
+        // A popup with no text still opens the panel; asking with an empty
+        // string would throw inside the core, so only focus the input.
         input?.focus();
+        return;
+      }
+      if (run(doc, mount, selection, button.action)) {
+        return;
+      }
+      // The question could not start this time. The notice already says why;
+      // put the selected text in the input so it is not lost, and let the
+      // user resubmit once the current question finishes.
+      if (input) {
+        input.value = selection;
+        input.focus();
       }
     });
     container.append(node);

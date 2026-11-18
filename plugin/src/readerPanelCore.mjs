@@ -132,6 +132,7 @@ export const MESSAGE_KEYS = Object.freeze([
   "reader-panel-placeholder",
   "reader-panel-ask",
   "reader-panel-example",
+  "reader-panel-wait",
   "reader-panel-empty",
   "reader-panel-stage-searching",
   "reader-panel-stage-verifying",

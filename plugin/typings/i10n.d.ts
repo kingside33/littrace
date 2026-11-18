@@ -18,6 +18,7 @@ export type FluentMessageId =
   | 'reader-panel-stage-verifying'
   | 'reader-panel-title'
   | 'reader-panel-toolbar-entry'
+  | 'reader-panel-wait'
   | 'reader-selection-evidence'
   | 'reader-selection-lineage'
   | 'startup-begin'

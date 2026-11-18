@@ -9,6 +9,7 @@ reader-panel-demo-note = 原型:内容为静态假数据,不连接本地服务
 reader-panel-placeholder = 就这篇文章提问
 reader-panel-ask = 提问
 reader-panel-example = 例如:这个方法在哪些实验条件下成立?
+reader-panel-wait = 上一问还在进行,完成后再提交
 reader-panel-empty = 还没有提问。输入一个问题,或选中正文后用「查证据」。
 reader-panel-stage-searching = 检索证据
 reader-panel-stage-verifying = 核验结论

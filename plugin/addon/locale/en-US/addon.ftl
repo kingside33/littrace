@@ -10,6 +10,7 @@ reader-panel-demo-note = Prototype: static fake data, no local service
 reader-panel-placeholder = Ask about this paper
 reader-panel-ask = Ask
 reader-panel-example = For example: under which experimental conditions does this method hold?
+reader-panel-wait = The previous question is still running; submit again when it finishes
 reader-panel-empty = No question yet. Type one, or select text and use Check evidence.
 reader-panel-stage-searching = Retrieving evidence
 reader-panel-stage-verifying = Verifying claims
