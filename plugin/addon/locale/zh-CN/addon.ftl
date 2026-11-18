@@ -22,3 +22,9 @@ reader-panel-toolbar-entry = 证据问答
 reader-panel-close = 关闭证据问答
 reader-selection-evidence = 查证据
 reader-selection-lineage = 问谱系
+
+# 四个 iframe 功能 tab 的标题(U4)。tab 注册表引用这些 key,标题本身只在此处维护。
+tab-title-graph = 研究谱系
+tab-title-search = 证据检索
+tab-title-research = 研究调度台
+tab-title-approvals = 全文审批

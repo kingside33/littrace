@@ -23,3 +23,10 @@ reader-panel-toolbar-entry = Evidence Q&A
 reader-panel-close = Close evidence Q&A
 reader-selection-evidence = Check evidence
 reader-selection-lineage = Ask lineage
+
+# Titles for the four iframe function tabs (U4). The tab registry references
+# these keys; the titles themselves are maintained only here.
+tab-title-graph = Research Lineage
+tab-title-search = Evidence Search
+tab-title-research = Research Dashboard
+tab-title-approvals = Full-text Approvals

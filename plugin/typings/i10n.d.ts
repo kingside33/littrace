@@ -22,4 +22,8 @@ export type FluentMessageId =
   | 'reader-selection-evidence'
   | 'reader-selection-lineage'
   | 'startup-begin'
-  | 'startup-finish';
+  | 'startup-finish'
+  | 'tab-title-approvals'
+  | 'tab-title-graph'
+  | 'tab-title-research'
+  | 'tab-title-search';
