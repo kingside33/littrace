@@ -286,31 +286,37 @@ function renderEmpty(doc: Document): HTMLElement {
   return hint;
 }
 
-/** Full repaint of the stream. Card nodes are keyed by id and reused. */
+/**
+ * Full repaint of the stream.
+ *
+ * Card nodes are keyed by id and reused, so a repaint never recreates a card
+ * and `<details open>` survives. The stream's child list is REPLACED rather
+ * than appended to: the progress row and the empty hint carry no card id, so
+ * an append-only rebuild leaves the previous progress row (and the first-run
+ * "no question yet" hint) in the stream forever -- a stale 35% bar sitting
+ * under every finished answer, one more per question.
+ */
 function paintStream(doc: Document, mount: PanelMount): void {
   const stream = mount.root.querySelector<HTMLElement>(".lt-stream");
   if (!stream) {
     return;
   }
   const views = cardViews(mount.state);
-  const wanted = new Set(views.map((view) => view.id));
 
-  // Reuse existing nodes by id so a repaint keeps <details> state; drop only
-  // nodes whose card no longer exists (a no-op under the append-only rule).
+  // Reuse live card nodes by id. Anything else in the stream (a previous
+  // progress row, the empty hint, a card no longer in the model) is dropped
+  // by replaceChildren below instead of being kept around.
   const existing = new Map<string, Element>();
   for (const node of Array.from(stream.querySelectorAll("[data-card-id]"))) {
     const id = (node as HTMLElement).dataset.cardId;
-    if (id && wanted.has(id)) {
+    if (id) {
       existing.set(id, node);
-    } else {
-      node.remove();
     }
   }
 
-  const ordered: Element[] = views.map((view) => {
-    const node = existing.get(view.id) ?? renderCard(doc, view);
-    return node;
-  });
+  const ordered: Element[] = views.map(
+    (view) => existing.get(view.id) ?? renderCard(doc, view),
+  );
 
   const status = panelStatus(mount.state);
   if (status.kind === "busy") {
@@ -319,11 +325,11 @@ function paintStream(doc: Document, mount: PanelMount): void {
     ordered.push(renderEmpty(doc));
   }
 
-  // Rebuild order in one pass; nodes are the same objects, so nothing that
-  // holds DOM state is recreated.
-  for (const node of ordered) {
-    stream.append(node);
-  }
+  // Moving an existing node keeps its state, so reusing card objects and
+  // replacing the child list keeps `<details>` open and closed as they were.
+  const scroll = stream.scrollTop;
+  stream.replaceChildren(...ordered);
+  stream.scrollTop = scroll;
 }
 
 /** Everything one question needs: the question card, the row, then the outcome. */

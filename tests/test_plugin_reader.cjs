@@ -59,6 +59,29 @@ function failedFixture(mod) {
   return mod.fail(state, { message: "本地服务连接中断" });
 }
 
+/**
+ * Extract one function body from TypeScript source by brace matching.
+ *
+ * Used only for wiring that cannot run under node (it needs a Document and a
+ * Zotero global). The assertion is always about a statement being present or
+ * about its order, never about the exact formatting.
+ */
+function functionBody(source, name) {
+  const start = source.indexOf(`function ${name}(`);
+  assert.notEqual(start, -1, `readerPanel.ts must define ${name}`);
+  const open = source.indexOf("{", start);
+  assert.notEqual(open, -1, `${name} must have a body`);
+  let depth = 0;
+  for (let i = open; i < source.length; i += 1) {
+    if (source[i] === "{") depth += 1;
+    if (source[i] === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(open + 1, i);
+    }
+  }
+  throw new Error(`unbalanced braces in ${name}`);
+}
+
 test("appending an answer keeps every earlier card by reference and frozen", async () => {
   const mod = await core();
   let state = mod.createState();
@@ -457,4 +480,34 @@ test("reader events are registered once, not once per main window", () => {
 test("an unknown card kind throws instead of rendering a blank card", async () => {
   const mod = await core();
   assert.throws(() => mod.cardView({ id: "c1", kind: "mystery" }), /未知卡片种类/);
+});
+
+// ---------------------------------------------------------------------------
+// Review findings on PR #20. These are wiring bugs in readerPanel.ts, which
+// cannot run under node (it needs a Document and a Zotero global). The checks
+// below therefore pin the SHAPE of the code that fixes each one: the
+// regression is a specific statement going missing, and each assertion names
+// the symptom that statement prevents.
+// ---------------------------------------------------------------------------
+
+test("finding 4609667207: the stream is replaced, so a stale progress row cannot accumulate", () => {
+  const source = fs.readFileSync(PANEL_TS, "utf8");
+  const paint = functionBody(source, "paintStream");
+
+  assert.match(
+    paint,
+    /stream\.replaceChildren\(/,
+    "paintStream must replace the child list; appending leaves .lt-stage and .lt-empty in the stream forever",
+  );
+  assert.doesNotMatch(
+    paint,
+    /for \(const node of ordered\) \{\s*stream\.append\(node\)/,
+    "appending ordered nodes is exactly the bug: the old progress row stays and one more is added per question",
+  );
+  // The reuse map is what keeps <details> state across a repaint.
+  assert.match(
+    paint,
+    /data-card-id/,
+    "card nodes are still reused by id, so replaceChildren does not reset disclosure state",
+  );
 });
