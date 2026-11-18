@@ -8,4 +8,5 @@
 - 测试纪律:能脱离 Zotero 跑的纯逻辑测试一律放仓库根 `tests/test_*.cjs`(只用 node 内置模块),并同步加进 `.github/workflows/ci.yml` 的 TRACKED_TESTS 与 `node --test` 两处显式清单;依赖 Zotero 进程的测试只属真机验收批次,不进 CI。
 - manifest 字段出处:`addon/manifest.json` 是唯一事实源,全部字面量、不经模板 `__占位__` 替换;`version` 必须与 `package.json` 保持一致(`tests/test_plugin_manifest.cjs` 校验)。
 - 占位 ID:pluginID 暂为 `littrace@example.invalid`,待 A0 定名后在 `addon/manifest.json` 与 `package.json` 的 `config.addonID` 同步替换,名称不含 "Zotero" 字样。
-- 注册纪律:一切 Zotero 注册(列 / section / 菜单 / notifier / 深链桥)只挂 `src/registry.ts` 的 `registerAll`,并交出 disposer;禁用 / 卸载由 `src/hooks.ts` 经 `unregisterAll` 全量回收,不得另立注册入口。
+- 注册纪律:一切 Zotero 注册(列 / section / 菜单 / notifier / 深链桥)只挂 `src/registry.ts` 的 `registerAll`,并交出 disposer;窗口级注册用 `register(win, id, dispose)`,同一 id 可在**每个窗口各注册一次**(同一窗口内重复才报错);窗口无关的(notifier / 深链桥)用 `registerGlobal(id, dispose)`。关闭单个窗口只由 `unregisterWindow(win)` 回收该窗口,禁用 / 卸载由 `src/hooks.ts` 经 `unregisterAll()` 全量回收,不得另立注册入口。
+- 注册簿实现:`src/registryCore.mjs` 是纯 ESM(无 Zotero 全局),由 `tests/test_plugin_registry.cjs` 直接跑真实逻辑;`src/registry.ts` 只做类型化包装与错误上报,改语义要同时改测试。

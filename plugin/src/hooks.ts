@@ -1,6 +1,6 @@
 import { config } from "../package.json";
 import { initLocale } from "./utils/locale";
-import { registerAll, unregisterAll } from "./registry";
+import { registerAll, unregisterAll, unregisterWindow } from "./registry";
 
 /**
  * Lifecycle dispatcher. bootstrap.js forwards the Zotero bootstrap hooks
@@ -32,11 +32,13 @@ async function onMainWindowLoad(win: Window): Promise<void> {
   await registerAll(win);
 }
 
-async function onMainWindowUnload(_win: Window): Promise<void> {
-  unregisterAll();
+async function onMainWindowUnload(win: Window): Promise<void> {
+  // Only this window's registrations: other main windows stay functional.
+  unregisterWindow(win);
 }
 
 function onShutdown(): void {
+  // Disable/uninstall: reclaim every window plus the window-independent ones.
   unregisterAll();
   addon.data.alive = false;
   delete Zotero[config.addonInstance];
