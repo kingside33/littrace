@@ -208,6 +208,7 @@ menu-guide-status-offline = Still cannot reach the local service.
 # Immediate feedback for menu commands (one ProgressWindow line).
 menu-feedback-headline = littrace
 menu-feedback-compare-added = Added to the comparison set: { $count } paper(s) (2 to 4 can be compared)
+menu-feedback-compare-partial = Added { $count } paper(s); { $full } more were not added because the set is full (at most 4)
 menu-feedback-compare-duplicate = The selected papers are already in the comparison set
 menu-feedback-compare-full = The comparison set is full (4); clear it first
 menu-feedback-compare-cleared = Comparison set cleared

@@ -14,6 +14,7 @@ export type FluentMessageId =
   | 'menu-feedback-compare-duplicate'
   | 'menu-feedback-compare-error'
   | 'menu-feedback-compare-full'
+  | 'menu-feedback-compare-partial'
   | 'menu-feedback-compare-submitted'
   | 'menu-feedback-compare-unindexed'
   | 'menu-feedback-compare-unknown'

@@ -759,6 +759,7 @@ export function guideView(context = {}) {
 export const FEEDBACK_KEYS = Object.freeze({
   headline: "menu-feedback-headline",
   compareAdded: "menu-feedback-compare-added",
+  comparePartial: "menu-feedback-compare-partial",
   compareDuplicate: "menu-feedback-compare-duplicate",
   compareFull: "menu-feedback-compare-full",
   compareCleared: "menu-feedback-compare-cleared",
@@ -775,14 +776,27 @@ export const FEEDBACK_KEYS = Object.freeze({
   selectFirst: "menu-feedback-select-first",
 });
 
-/** Which feedback line one 「加入对比集」 result deserves. */
+/**
+ * Which feedback line one 「加入对比集」 result deserves.
+ *
+ * A partially accepted add is its own line: with `added > 0` the naive answer
+ * is 「已加入」, which hides that the rest were refused because the set was
+ * full — the user would think all selected papers made it in and compare the
+ * wrong combination.
+ */
 export function compareAddFeedback(result) {
-  if (!result || result.added === 0) {
-    return result && result.duplicate > 0
-      ? FEEDBACK_KEYS.compareDuplicate
-      : FEEDBACK_KEYS.compareFull;
+  if (!result) {
+    return FEEDBACK_KEYS.compareFull;
   }
-  return FEEDBACK_KEYS.compareAdded;
+  if (result.added > 0) {
+    return result.full > 0 ? FEEDBACK_KEYS.comparePartial : FEEDBACK_KEYS.compareAdded;
+  }
+  // Nothing added: a refusal for the cap is the fact to report; 「already in
+  // the set」 only when nothing was refused.
+  if (result.full > 0) {
+    return FEEDBACK_KEYS.compareFull;
+  }
+  return result.duplicate > 0 ? FEEDBACK_KEYS.compareDuplicate : FEEDBACK_KEYS.compareFull;
 }
 
 /**

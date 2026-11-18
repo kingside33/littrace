@@ -410,14 +410,29 @@ test("the comparison set is 2–4 papers, deduped, and never silently evicts", a
   assert.equal(core.COMPARE_MIN, Number(bound[1]));
   assert.equal(core.COMPARE_MAX, Number(bound[2]));
 
-  // Feedback selection: added / already there / full.
+  // Feedback selection: added / already there / full / partially accepted.
   assert.equal(core.compareAddFeedback(first), core.FEEDBACK_KEYS.compareAdded);
   assert.equal(core.compareAddFeedback(dup), core.FEEDBACK_KEYS.compareDuplicate);
-  assert.equal(core.compareAddFeedback(overflow), core.FEEDBACK_KEYS.compareAdded);
+  assert.equal(core.compareAddFeedback(overflow), core.FEEDBACK_KEYS.comparePartial);
   assert.equal(
     core.compareAddFeedback({ entries: [], added: 0, duplicate: 0, full: 1, size: 4 }),
     core.FEEDBACK_KEYS.compareFull,
   );
+  // Mixed refusal: the cap wins over 「already in the set」, because a refused
+  // paper is the one the user cannot see in the set.
+  assert.equal(
+    core.compareAddFeedback({ entries: [], added: 0, duplicate: 1, full: 2, size: 4 }),
+    core.FEEDBACK_KEYS.compareFull,
+  );
+  // A partially accepted add must name the refused papers: the message is the
+  // only place the overflow is reported, and it uses the count passed in.
+  const partialKey = core.FEEDBACK_KEYS.comparePartial;
+  for (const locale of ["en-US", "zh-CN"]) {
+    const line = parseFtl(locale).get(partialKey);
+    assert.ok(line, `${locale} is missing ${partialKey}`);
+    assert.match(line, /\$full/, `${locale} ${partialKey} must state how many were refused`);
+    assert.match(line, /\$count/, `${locale} ${partialKey} must state how many were added`);
+  }
 });
 
 test("paper identity is z:<libraryID>:<key>, parents included, bad ids refused", async () => {

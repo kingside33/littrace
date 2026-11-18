@@ -204,6 +204,7 @@ menu-guide-status-offline = 仍然连不上本地服务。
 # 菜单命令的即时反馈(ProgressWindow 一行)。
 menu-feedback-headline = littrace
 menu-feedback-compare-added = 已加入对比集:{ $count } 篇(2 至 4 篇可对比)
+menu-feedback-compare-partial = 已加入 { $count } 篇;另有 { $full } 篇因对比集已满(最多 4 篇)未加入
 menu-feedback-compare-duplicate = 所选文献已经在对比集里
 menu-feedback-compare-full = 对比集已满(4 篇);先「清空对比集」再加入
 menu-feedback-compare-cleared = 已清空对比集
