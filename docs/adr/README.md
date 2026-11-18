@@ -25,3 +25,14 @@
 | [0008](0008-version-test-asserts-pyproject-fallback.md) | [S3] 版本测试断言 pyproject 兜底值 | 免安装模式下同样成立,两种受支持运行模式都被覆盖 |
 | [0009](0009-registry-keyed-by-window.md) | [A1] 注册簿按窗口分键 | 同一 id 每窗口各注册一次,纯逻辑抽到 registryCore.mjs 供 node 测试 |
 | [0010](0010-two-findings-separate-commits-test-anchors.md) | [A1] 两个发现独立提交各带测试锚定 | registry 层跑真实逻辑,钩子接线按函数体文本锁定,均登记 ci.yml |
+| [0011](0011-a2-column-registration-in-register-window-independent.md) | [A2] 列注册并入已有的 registerWindowIndependent() | 进程级注册只保留一个入口与一个防重入标志,不新增 registerGlobalAll |
+| [0012](0012-a2-badge-number-is-confirmed-count.md) | [A2] 徽标旁的数字恒为已确认关系数 | 数字与三态徽标解耦,状态只由字形表达、明细由 title 给出 |
+| [0013](0013-a2-non-item-rows-no-badge.md) | [A2] 非条目行不给徽标、不派发定位载荷 | 按 _objectType 判定条目,回收站里的收藏夹与保存搜索不算条目 |
+| [0014](0014-a3-paint-stream-replace-children.md) | [A3] 卡片流重画整体替换子节点列表 | 卡片按 id 复用,进度行与空态提示每轮重画、旧的自然消失 |
+| [0015](0015-a3-prune-detached-mounts.md) | [A3] 用 isConnected 兜底回收已关闭阅读器的面板 | 不依赖未定案的 reader 关闭事件名,打开面板或禁用时清扫 |
+| [0016](0016-a3-settle-clear-timer-first.md) | [A3] settle() 先清飞行中标记再构造结果 | 异常转成可重试失败卡片,面板不会卡在 busy |
+| [0017](0017-a3-refuse-question-visible-notice.md) | [A3] 拒绝新提问时给出可见提示 | 输入不被静默吞掉,提交按钮置灰并说明原因 |
+| [0018](0018-s4-no-auto-retry-request-discipline.md) | [S4] 请求显式 errorDelayMax: 0 + timeout: 10000 | 本地确定性端点不自动重试,重试只由用户显式触发 |
+| [0019](0019-s4-transport-non-2xx-as-response.md) | [S4] 传输层把非 2xx 当响应返回 | 只有无响应才是 status 0,错误分类成为可测试的纯函数 |
+| [0020](0020-s4-idless-submit-is-outcome.md) | [S4] 无任务 ID 的提交是结论而非错误 | submitTask 返回带 outcome 的判别式结论,不再把成功报成失败 |
+| [0021](0021-s4-requirements-missing-vs-null.md) | [S4] requirements 区分「未提供」与「显式 null」 | 缺键取默认、null 关闭边界、其他类型抛错 |
