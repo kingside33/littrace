@@ -29,6 +29,20 @@ export type Requirements = {
   maxServiceVersion?: string | null;
 };
 
+/**
+ * The answer to a task submit.
+ *
+ * - `queued`  the service named a task; `taskId` is pollable
+ * - `started` accepted, but the service names no task (`POST /api/jobs`)
+ * - `running` a task was already running; `message` is the service's text
+ * - `unknown` 2xx without a recognizable outcome; not a success, not retried
+ */
+export type SubmitResult =
+  | { outcome: "queued"; taskId: string; message: string | null; data: any }
+  | { outcome: "started"; taskId: null; state: string; message: string | null; data: any }
+  | { outcome: "running"; taskId: null; state: string; message: string | null; data: any }
+  | { outcome: "unknown"; taskId: null; state: string | null; data: any };
+
 export type WaitHandle = { promise: Promise<void>; cancel: () => void };
 
 export type PollResult = {
@@ -59,12 +73,13 @@ export type ServiceClient = {
   get(path: string): Promise<any>;
   post(path: string, body?: unknown): Promise<any>;
   probe(): Promise<HealthVerdict>;
-  submitTask(path: string, body?: unknown): Promise<{ taskId: string; data: any }>;
+  submitTask(path: string, body?: unknown): Promise<SubmitResult>;
   pollTask(options: PollOptions): Poller;
 };
 
 export declare const TERMINAL_STATUSES: readonly string[];
 export declare const SAFE_METHODS: readonly string[];
+export declare const IDLESS_SUBMIT_STATES: readonly string[];
 export declare const REQUEST_DISCIPLINE: { errorDelayMax: number; timeout: number };
 export declare const HEALTH_STATES: {
   AVAILABLE: "available";
@@ -97,7 +112,12 @@ export declare function assessHealth(
   response: { status?: number; text?: string },
   requirements?: Requirements,
 ): HealthVerdict;
-export declare function taskIdFromResponse(data: any): string;
+export declare function classifySubmit(data: any): {
+  outcome: "queued" | "started" | "running" | "unknown";
+  taskId: string | null;
+  state?: string | null;
+  message?: string | null;
+};
 export declare function timerWait(ms: number): WaitHandle;
 export declare function startPolling(options: {
   poll: () => Promise<any>;

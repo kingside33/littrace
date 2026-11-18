@@ -44,6 +44,18 @@ export const TERMINAL_STATUSES = Object.freeze([
 export const SAFE_METHODS = Object.freeze(["GET", "HEAD", "OPTIONS"]);
 
 /**
+ * Submit responses that are accepted without an id to poll.
+ *
+ * `POST /api/jobs` is the case: `kbapp/web/system_api.py:62-68` forwards to
+ * `JobCoordinator.start_update`, which answers `{'state': 'started'}`
+ * (kbapp/workflows/jobs.py:68) or `{'state': 'running', 'message': ...}`
+ * when a task is already running (jobs.py:42/46/48/53). Neither carries an
+ * id. Treating that as a failure would report "submit failed" for a submit
+ * that succeeded, which is why these are outcomes, not errors.
+ */
+export const IDLESS_SUBMIT_STATES = Object.freeze(["started", "running"]);
+
+/**
  * The request discipline, in one place. Every request builder copies these
  * two numbers; tests assert them on every recorded request.
  */
@@ -275,22 +287,31 @@ export function assessHealth(response, requirements = {}) {
 }
 
 /**
- * Read the task id out of a POST response (the service returns
- * `{"id": "...", "state": "started"}`, e.g. kbapp/web/document_api.py).
+ * Classify a POST submit response.
+ *
+ * Returns one of:
+ *   { outcome: "queued",  taskId }                            poll it
+ *   { outcome: "started", taskId: null, state, message }      accepted
+ *   { outcome: "running", taskId: null, state, message }      already running
+ *   { outcome: "unknown", taskId: null, state }               2xx, no outcome
+ *
+ * "unknown" is the only branch that is not a success: the service answered
+ * 2xx without saying what happened, so the caller must not claim success,
+ * but nothing may be retried blindly either — the task may exist anyway.
  */
-export function taskIdFromResponse(data) {
-  const id =
-    data && typeof data === "object" && !Array.isArray(data)
-      ? data.id ?? data.task_id
-      : undefined;
-  if (typeof id !== "string" || id.length === 0) {
-    throw new ServiceClientError("服务未返回任务 ID，无法轮询", {
-      kind: "contract",
-      retryable: false,
-      detail: data ?? null,
-    });
+export function classifySubmit(data) {
+  const record =
+    data && typeof data === "object" && !Array.isArray(data) ? data : {};
+  const id = record.id ?? record.task_id;
+  if (typeof id === "string" && id.length > 0) {
+    return { outcome: "queued", taskId: id };
   }
-  return id;
+  const state = typeof record.state === "string" ? record.state : null;
+  const message = typeof record.message === "string" ? record.message : null;
+  if (state !== null && IDLESS_SUBMIT_STATES.includes(state)) {
+    return { outcome: state, taskId: null, state, message };
+  }
+  return { outcome: "unknown", taskId: null, state };
 }
 
 /**
@@ -567,9 +588,17 @@ export function createServiceClient(options = {}) {
     return assessHealth(response, requirements);
   }
 
+  /**
+   * Submit a task and classify the answer.
+   *
+   * Returns `{outcome, taskId, state?, message?, data}`. Callers branch on
+   * `outcome`, never on the presence of `taskId`: only "queued" is pollable,
+   * and "queued"/"started"/"running" are all success ("running" means a task
+   * was already in flight).
+   */
   async function submitTask(path, body) {
     const data = await send("POST", path, body);
-    return { taskId: taskIdFromResponse(data), data };
+    return { ...classifySubmit(data), data };
   }
 
   function pollTask(pollOptions = {}) {

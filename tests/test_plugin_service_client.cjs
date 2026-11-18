@@ -58,7 +58,9 @@ test("every request carries errorDelayMax: 0 and timeout: 10000", async () => {
   const core = await loadCore();
   const { calls, request } = recorder({
     [`GET ${BASE}/api/session`]: json({ token: "t0k" }),
-    [`POST ${BASE}/api/jobs`]: json({ id: "job-1", state: "started" }),
+    // The real POST /api/jobs shape: kbapp/workflows/jobs.py:68 returns
+    // {'state': 'started'} with no id.
+    [`POST ${BASE}/api/jobs`]: json({ state: "started" }),
     [`GET ${BASE}/api/documents/jobs/job-1`]: json({ id: "job-1", status: "running" }),
     [`GET ${BASE}/api/version`]: json({ service_version: "0.1.0", api_version: "v2" }),
   });
@@ -134,7 +136,8 @@ test("the session token is fetched once and cached", async () => {
       sessionCalls += 1;
       return json({ token: "t0k" });
     },
-    [`POST ${BASE}/api/jobs`]: json({ id: "job-1", state: "started" }),
+    // Real POST /api/jobs shape: no id (kbapp/workflows/jobs.py:68).
+    [`POST ${BASE}/api/jobs`]: json({ state: "started" }),
   });
   const client = core.createServiceClient({ baseUrl: BASE, request });
 
@@ -155,7 +158,8 @@ test("concurrent first writes share one token fetch", async () => {
       sessionCalls += 1;
       return json({ token: "t0k" });
     },
-    [`POST ${BASE}/api/jobs`]: json({ id: "job-1", state: "started" }),
+    // Real POST /api/jobs shape: no id (kbapp/workflows/jobs.py:68).
+    [`POST ${BASE}/api/jobs`]: json({ state: "started" }),
   });
   const client = core.createServiceClient({ baseUrl: BASE, request });
 
@@ -183,7 +187,7 @@ test("a 403 drops the cached token and the next request refetches it", async () 
       // The second token is the one the current service process issued; the
       // first is stale, exactly like a token left over from a previous run.
       return options.headers["x-kb-token"] === "second"
-        ? json({ id: "job-1", state: "started" })
+        ? json({ state: "started" })
         : { status: 403, text: JSON.stringify({ detail: "本机会话校验失败，请刷新页面" }) };
     },
   });
@@ -197,7 +201,7 @@ test("a 403 drops the cached token and the next request refetches it", async () 
   });
   // The cached token was invalidated by the 403, so this attempt refetches.
   const result = await client.post("/api/jobs", {});
-  assert.deepEqual(result, { id: "job-1", state: "started" });
+  assert.deepEqual(result, { state: "started" }, "the raw body is passed through");
   assert.deepEqual(seen, ["first", "second"], "the 403 forced a re-auth");
   assert.equal(sessionCalls, 2);
 });
@@ -430,12 +434,14 @@ test("pollTask wires submit + poll through one client", async () => {
   const core = await loadCore();
   const { calls, request } = recorder({
     [`GET ${BASE}/api/session`]: json({ token: "t0k" }),
+    // Real POST /api/documents/process shape (kbapp/web/document_api.py:178).
     [`POST ${BASE}/api/documents/process`]: json({ id: "job-7", state: "started" }),
     [`GET ${BASE}/api/documents/jobs/job-7`]: json({ id: "job-7", status: "complete", progress: "done" }),
   });
   const client = core.createServiceClient({ baseUrl: BASE, request });
 
   const submitted = await client.submitTask("/api/documents/process", { paper_id: "p" });
+  assert.equal(submitted.outcome, "queued", "an id means pollable");
   assert.equal(submitted.taskId, "job-7");
 
   const poller = client.pollTask({
@@ -453,18 +459,65 @@ test("pollTask wires submit + poll through one client", async () => {
   assert.equal("x-kb-token" in taskPoll.options.headers, false, "polling is a GET");
 });
 
-test("a submit response without a task id is a contract error", async () => {
+test("an id-less submit is an outcome, not a failure", async () => {
+  // The reviewer's finding: POST /api/jobs answers {'state': 'started'} or
+  // {'state': 'running', 'message': ...} and never an id
+  // (kbapp/workflows/jobs.py:42/46/48/53/68). Reporting that as a
+  // retryable:false contract error told the user "submit failed" for a submit
+  // that had succeeded.
+  const core = await loadCore();
+  const cases = [
+    ["accepted with no id", { state: "started" }, "started", null],
+    ["already running", { state: "running", message: "更新任务已在运行" }, "running", "更新任务已在运行"],
+    ["running without a message", { state: "running" }, "running", null],
+    ["a 2xx with no state", {}, "unknown", null],
+    ["a non-object body", [], "unknown", null],
+  ];
+
+  for (const [label, body, outcome, message] of cases) {
+    const client = core.createServiceClient({
+      baseUrl: BASE,
+      request: async (method, url) =>
+        url.endsWith("/api/session") ? json({ token: "t0k" }) : json(body),
+    });
+    const submitted = await client.submitTask("/api/jobs", { action: "update" });
+    assert.equal(submitted.outcome, outcome, label);
+    assert.equal(submitted.taskId, null, `${label}: no id to poll`);
+    if (message !== null || outcome === "running") {
+      assert.equal(submitted.message, message, `${label}: the service's text is kept`);
+    }
+  }
+});
+
+test("a real vector submit names its task and stays pollable", async () => {
+  // kbapp/workflows/vector_jobs.py:25 both starts and names the task.
   const core = await loadCore();
   const client = core.createServiceClient({
     baseUrl: BASE,
     request: async (method, url) =>
-      url.endsWith("/api/session") ? json({ token: "t0k" }) : json({ state: "started" }),
+      url.endsWith("/api/session")
+        ? json({ token: "t0k" })
+        : json({ state: "started", id: "vec-1", kind: "vectors", message: "已启动本地向量索引" }),
   });
-  await assert.rejects(client.submitTask("/api/jobs", {}), (error) => {
-    assert.equal(error.kind, "contract");
-    assert.match(error.message, /任务 ID/);
-    return true;
+  const submitted = await client.submitTask("/api/jobs", { action: "vectors" });
+  assert.equal(submitted.outcome, "queued");
+  assert.equal(submitted.taskId, "vec-1");
+});
+
+test("submit classification covers the whole service vocabulary", async () => {
+  const core = await loadCore();
+  assert.deepEqual([...core.IDLESS_SUBMIT_STATES], ["started", "running"]);
+  assert.deepEqual(core.classifySubmit({ id: "a", task_id: "b" }), {
+    outcome: "queued",
+    taskId: "a",
   });
+  assert.deepEqual(core.classifySubmit({ task_id: "b" }), {
+    outcome: "queued",
+    taskId: "b",
+  });
+  // An empty id is not an id: fall through to the state classification.
+  assert.equal(core.classifySubmit({ id: "", state: "started" }).outcome, "started");
+  assert.equal(core.classifySubmit(null).outcome, "unknown");
 });
 
 test("the timer wait is cancellable and resolves once", async () => {
