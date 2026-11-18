@@ -153,6 +153,9 @@ export const MESSAGE_KEYS = Object.freeze([
   "reader-panel-stage-verifying",
   "reader-panel-gap",
   "reader-panel-gap-hint",
+  "reader-panel-gap-warning",
+  "reader-panel-gap-truncated",
+  "reader-panel-gap-lineage",
   "reader-panel-evidence",
   "reader-panel-evidence-title",
   "reader-panel-guide",
@@ -445,21 +448,84 @@ export function answer(state, { conclusions = [], gaps = [], evidence = [] } = {
     );
     offset += 1;
   }
-  for (const gap of gaps) {
-    const reason = String(gap ?? "").trim();
+  for (const card of gapCards(state, gaps, offset)) {
+    next.push(card);
+    offset += 1;
+  }
+  return { ...appendCards(state, next), busy: false, stage: null };
+}
+
+/**
+ * 缺口卡片底部的固定提示，按缺口**成因**分开。
+ *
+ * 原先所有缺口共用 `reader-panel-gap-hint`(「这一问没有可定位页码的原文
+ * 证据，只保留问题本身」)，但 warning 与截断提示根本不是「没有证据」：
+ * 服务端说「向量模型已停，当前用关键词结果」并且证据卡片就正常显示在上方时，
+ * 一个写着「没有可定位页码的原文证据」的灰块直接否定了它上面的结果。
+ */
+export const GAP_HINTS = Object.freeze({
+  /** 真的没有找到可核验证据。 */
+  EVIDENCE: "reader-panel-gap-hint",
+  /** 服务端在检索过程中给出的提示（例如只用了关键词检索）。 */
+  WARNING: "reader-panel-gap-warning",
+  /** 命中条数被展示上限截断。 */
+  TRUNCATED: "reader-panel-gap-truncated",
+  /** 谱系覆盖缺口（没有关系、只有引用、关系被截断）。 */
+  LINEAGE: "reader-panel-gap-lineage",
+});
+
+/** 缺口入参：纯字符串（默认 EVIDENCE 提示）或带成因的对象。 */
+function normalizeGap(gap) {
+  if (gap && typeof gap === "object" && !Array.isArray(gap)) {
+    const reason = textOf(gap.reason);
     if (!reason) {
+      return null;
+    }
+    const hintKey = GAP_HINTS[gap.hint] ?? textOf(gap.hintKey) ?? GAP_HINTS.EVIDENCE;
+    return { reason, hintKey };
+  }
+  const reason = textOf(gap);
+  return reason ? { reason, hintKey: GAP_HINTS.EVIDENCE } : null;
+}
+
+/** 把带成因的缺口去重并限量；同一句话只留第一次出现的成因。 */
+function dedupeGaps(gaps) {
+  const seen = new Set();
+  const out = [];
+  for (const gap of gaps) {
+    const normalized = normalizeGap(gap);
+    if (!normalized || seen.has(normalized.reason)) {
       continue;
     }
-    next.push(
+    seen.add(normalized.reason);
+    out.push(gap);
+    if (out.length >= GAP_LIMIT) {
+      break;
+    }
+  }
+  return out;
+}
+
+/** 把一组缺口规则化成卡片对象，两处构造共用同一套规范化。 */
+function gapCards(state, gaps, startOffset) {
+  const cards = [];
+  let offset = startOffset;
+  for (const gap of gaps) {
+    const normalized = normalizeGap(gap);
+    if (!normalized) {
+      continue;
+    }
+    cards.push(
       Object.freeze({
         id: cardId(state, offset),
         kind: CARD_KINDS.GAP,
-        reason,
+        reason: normalized.reason,
+        hintKey: normalized.hintKey,
       }),
     );
     offset += 1;
   }
-  return { ...appendCards(state, next), busy: false, stage: null };
+  return cards;
 }
 
 /** 找出某张卡片之前最近的一张问题卡片，用于失败卡片记住「当时问的是什么」。 */
@@ -614,7 +680,10 @@ export function cardView(card) {
         id: card.id,
         kind: card.kind,
         reason: card.reason,
-        hintKey: "reader-panel-gap-hint",
+        // Per-card, not fixed: a retrieval warning or a truncation notice is
+        // not "no locatable evidence", and saying so contradicts the evidence
+        // cards rendered directly above it.
+        hintKey: card.hintKey ?? GAP_HINTS.EVIDENCE,
         // 缺口灰块**不可展开**：这是契约，不是渲染层的选择。
         expandable: false,
         toggle: null,
@@ -1077,18 +1146,25 @@ export function evidenceOutcome(payload) {
       },
     });
   }
+  // Each gap carries its cause, so the card's fixed hint matches it: a
+  // retrieval warning or a truncation notice is not "no locatable evidence".
   const gaps = [];
   if (hits.length === 0) {
-    gaps.push("本次检索没有找到可定位页码的原文证据。");
+    gaps.push({ reason: "本次检索没有找到可定位页码的原文证据。", hint: "EVIDENCE" });
   }
   const warning = textOf(record.warning);
   if (warning) {
-    gaps.push(warning);
+    gaps.push({ reason: warning, hint: "WARNING" });
   }
+  // The service answers at most `k` rows, so `rows.length` is the RETURNED
+  // count, not the hit total. Never claim a total this side cannot know.
   if (rows.length > hits.length) {
-    gaps.push(`共命中 ${rows.length} 条，只展示前 ${hits.length} 条。`);
+    gaps.push({
+      reason: `本次只取回 ${rows.length} 条，已展示前 ${hits.length} 条。`,
+      hint: "TRUNCATED",
+    });
   }
-  return { ok: true, hits, gaps: [...new Set(gaps)].slice(0, GAP_LIMIT) };
+  return { ok: true, hits, gaps: dedupeGaps(gaps) };
 }
 
 /** 一条谱系卡片的边数上限。 */
@@ -1214,20 +1290,25 @@ export function lineageOutcome(payload, { paperId = "" } = {}) {
   }
   const gaps = [];
   if (edges.length === 0) {
-    gaps.push(
-      nodes.size === 0
-        ? "这篇文献还没有进入方法谱系：先完成解析与索引。"
-        : "这篇文献还没有已确认的方法关系。",
-    );
+    gaps.push({
+      reason:
+        nodes.size === 0
+          ? "这篇文献还没有进入方法谱系：先完成解析与索引。"
+          : "这篇文献还没有已确认的方法关系。",
+      hint: "LINEAGE",
+    });
   } else {
     if (!edges.some((edge) => METHOD_RELATION_KINDS.includes(textOf(edge.kind)))) {
-      gaps.push("本文目前只有引用关系，还没有已确认的方法关系。");
+      gaps.push({ reason: "本文目前只有引用关系，还没有已确认的方法关系。", hint: "LINEAGE" });
     }
     if (ordered.length > LINEAGE_EDGE_LIMIT) {
-      gaps.push(`共 ${ordered.length} 条关系，只展示前 ${LINEAGE_EDGE_LIMIT} 条。`);
+      gaps.push({
+        reason: `共 ${ordered.length} 条关系，只展示前 ${LINEAGE_EDGE_LIMIT} 条。`,
+        hint: "TRUNCATED",
+      });
     }
   }
-  return { ok: true, conclusions, evidence, gaps: [...new Set(gaps)].slice(0, GAP_LIMIT) };
+  return { ok: true, conclusions, evidence, gaps: dedupeGaps(gaps) };
 }
 
 /** 把页码写进链接；链接已带 page 参数时以服务端认定的页码为准。 */
@@ -1379,18 +1460,8 @@ export function evidence(state, { hits = [], gaps = [] } = {}, options = {}) {
     );
     offset += 1;
   }
-  for (const gap of gaps) {
-    const reason = textOf(gap);
-    if (!reason) {
-      continue;
-    }
-    next.push(
-      Object.freeze({
-        id: cardId(state, offset),
-        kind: CARD_KINDS.GAP,
-        reason,
-      }),
-    );
+  for (const card of gapCards(state, gaps, offset)) {
+    next.push(card);
     offset += 1;
   }
   return { ...appendCards(state, next), busy: false, stage: null };

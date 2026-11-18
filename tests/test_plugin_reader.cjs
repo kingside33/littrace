@@ -972,9 +972,14 @@ test("a real search response becomes evidence cards with pages", async () => {
   assert.equal(outcome.hits[0].kindKey, "evidence-kind-paper_text");
   assert.equal(outcome.hits[1].citation.page, null, "a hit without a page is still a hit");
   assert.deepEqual(
-    outcome.gaps,
+    outcome.gaps.map((gap) => gap.reason),
     ["向量模型已被手动停止，当前使用关键词结果"],
     "the service warning is surfaced as a gap",
+  );
+  assert.equal(
+    outcome.gaps[0].hint,
+    "WARNING",
+    "a retrieval warning is not 'no locatable evidence', so it gets its own hint",
   );
 
   let state = mod.ask(mod.createState(), "选中的正文", { source: "selection:evidence" });
@@ -990,6 +995,11 @@ test("a real search response becomes evidence cards with pages", async () => {
   assert.equal(card.label, "Karaman2011 · p.7–8");
   assert.equal(card.expandable, false, "the quote IS the card, nothing to expand");
   assert.equal(card.toggle, null);
+  assert.equal(
+    mod.cardView(state.cards[3]).hintKey,
+    "reader-panel-gap-warning",
+    "the gap card's hint matches its cause instead of contradicting the hits above it",
+  );
 });
 
 test("a search with no hit yields a gap card, never a fake result", async () => {
@@ -997,7 +1007,12 @@ test("a search with no hit yields a gap card, never a fake result", async () => 
   const outcome = mod.evidenceOutcome({ query: "无命中", results: [], warning: "" });
 
   assert.equal(outcome.hits.length, 0);
-  assert.match(outcome.gaps[0], /没有找到可定位页码的原文证据/);
+  assert.match(outcome.gaps[0].reason, /没有找到可定位页码的原文证据/);
+  assert.equal(
+    outcome.gaps[0].hint,
+    "EVIDENCE",
+    "the 'no evidence' hint belongs only to a real empty result",
+  );
 
   let state = mod.ask(mod.createState(), "无命中");
   state = mod.evidence(state, outcome);
@@ -1005,9 +1020,13 @@ test("a search with no hit yields a gap card, never a fake result", async () => 
     state.cards.map((card) => card.kind),
     ["question", "gap"],
   );
+  assert.equal(
+    mod.cardView(state.cards[1]).hintKey,
+    "reader-panel-gap-hint",
+  );
 });
 
-test("more hits than the card limit are truncated and said so", async () => {
+test("a truncated search states what was returned, not a hit total it cannot know", async () => {
   const mod = await core();
   const results = Array.from({ length: mod.EVIDENCE_HIT_LIMIT + 3 }, (_, index) => ({
     id: `src:${index}`,
@@ -1019,10 +1038,34 @@ test("more hits than the card limit are truncated and said so", async () => {
 
   const outcome = mod.evidenceOutcome({ query: "q", results, warning: "" });
   assert.equal(outcome.hits.length, mod.EVIDENCE_HIT_LIMIT);
-  assert.ok(
-    outcome.gaps.some((gap) => gap.includes(String(results.length))),
-    "the total hit count is reported so the user knows cards were dropped",
+  const truncated = outcome.gaps.find((gap) => gap.hint === "TRUNCATED");
+  assert.ok(truncated, "the truncation is reported as its own cause");
+  assert.match(
+    truncated.reason,
+    new RegExp(`本次只取回 ${results.length} 条`),
+    "the sentence reports the returned row count, which is the only number this side has",
   );
+  assert.doesNotMatch(
+    truncated.reason,
+    /共命中/,
+    "the service truncated at k, so a hit total would be invented",
+  );
+
+  // The full-page worst case the review called out: k=6 returned, 5 shown.
+  // That must NOT read as "共命中 6 条" — the real total may be hundreds.
+  const fullPage = mod.evidenceOutcome({
+    query: "q",
+    results: Array.from({ length: 6 }, (_, index) => ({
+      id: `src:${index}`,
+      paper_id: PAPER,
+      kind: "paper_text",
+      text: `片段 ${index}`,
+      page_start: index + 1,
+    })),
+    warning: "",
+  });
+  assert.equal(fullPage.hits.length, 5);
+  assert.match(fullPage.gaps[0].reason, /本次只取回 6 条/);
 });
 
 test("a real graph response becomes lineage cards with page-bearing citations", async () => {
@@ -1088,13 +1131,13 @@ test("a paper with no lineage says which kind of nothing it is", async () => {
 
   const unknown = mod.lineageOutcome({ nodes: [], edges: [] }, { paperId: PAPER });
   assert.equal(unknown.conclusions.length, 0);
-  assert.match(unknown.gaps[0], /还没有进入方法谱系/);
+  assert.match(unknown.gaps[0].reason, /还没有进入方法谱系/);
 
   const noEdges = mod.lineageOutcome(
     { nodes: [{ id: PAPER, title: "本文" }], edges: [] },
     { paperId: PAPER },
   );
-  assert.match(noEdges.gaps[0], /还没有已确认的方法关系/);
+  assert.match(noEdges.gaps[0].reason, /还没有已确认的方法关系/);
 
   const citationsOnly = mod.lineageOutcome(
     {
@@ -1104,9 +1147,20 @@ test("a paper with no lineage says which kind of nothing it is", async () => {
     { paperId: PAPER },
   );
   assert.match(
-    citationsOnly.gaps.join(" "),
+    citationsOnly.gaps.map((gap) => gap.reason).join(" "),
     /只有引用关系/,
     "a citation is not a method relation, and the gap must say so",
+  );
+  assert.ok(
+    citationsOnly.gaps.every((gap) => gap.hint === "LINEAGE"),
+    "lineage coverage notes do not claim 'no locatable evidence'",
+  );
+
+  let state = mod.ask(mod.createState(), "选中正文", { source: "selection:lineage" });
+  state = mod.answer(state, unknown, { paperId: PAPER });
+  assert.equal(
+    mod.cardView(state.cards.at(-1)).hintKey,
+    "reader-panel-gap-lineage",
   );
 });
 

@@ -65,7 +65,18 @@ export interface GapCard {
   readonly id: string;
   readonly kind: "gap";
   readonly reason: string;
+  /** Which fixed hint the card shows; see GAP_HINTS. */
+  readonly hintKey: string;
 }
+
+/** A gap input: the bare sentence, or the sentence plus its cause. */
+export type GapInput =
+  | string
+  | {
+      readonly reason: string;
+      readonly hint?: "EVIDENCE" | "WARNING" | "TRUNCATED" | "LINEAGE";
+      readonly hintKey?: string;
+    };
 
 export interface GuideCard {
   readonly id: string;
@@ -189,7 +200,7 @@ export interface Outcome {
     text: string;
     citations?: readonly CitationInput[];
   }[];
-  readonly gaps?: readonly string[];
+  readonly gaps?: readonly GapInput[];
   readonly evidence?: readonly { quote?: string; citation?: CitationInput }[];
 }
 
@@ -213,7 +224,7 @@ export function evidence(
       kindKey?: string | null;
       citation?: CitationInput;
     }[];
-    gaps?: readonly string[];
+    gaps?: readonly GapInput[];
   },
   options?: CitationContext,
 ): PanelState;
