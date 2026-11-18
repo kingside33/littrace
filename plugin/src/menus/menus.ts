@@ -497,25 +497,22 @@ async function runParse(window: Window, items: unknown): Promise<void> {
     return;
   }
   const paper = paperIdOf(target);
-  let resolved = "";
-  try {
-    const snapshot = await addon.service.get(
-      `/api/v2/paper/sections?paper=${encodeURIComponent(paper)}`,
-    );
-    resolved =
-      snapshot && typeof snapshot.paper_id === "string" ? snapshot.paper_id : "";
-  } catch (error) {
-    report(error, "解析前解析文献");
-    feedback(window, FEEDBACK_KEYS.selectFirst);
-    return;
-  }
-  if (!resolved) {
-    feedback(window, FEEDBACK_KEYS.selectFirst);
+  const resolved = await resolvePaperId(paper);
+  if (!resolved.ok) {
+    // The two failures are different: 404 means the paper is not in the
+    // library (the user must index it), anything else is the service's own
+    // error and its text is shown verbatim. Neither is a selection problem —
+    // the user did select an item, and "select an item" would be a dead end.
+    if (resolved.missing) {
+      feedback(window, FEEDBACK_KEYS.parseNotIndexed);
+    } else {
+      feedback(window, FEEDBACK_KEYS.parseError, { detail: resolved.detail });
+    }
     return;
   }
   try {
     const result = await addon.service.submitTask("/api/documents/process", {
-      paper_id: resolved,
+      paper_id: resolved.paperId,
     });
     feedback(
       window,
@@ -525,7 +522,7 @@ async function runParse(window: Window, items: unknown): Promise<void> {
     );
   } catch (error) {
     report(error, "提交解析");
-    feedback(window, FEEDBACK_KEYS.parseUnknown);
+    feedback(window, FEEDBACK_KEYS.parseError, { detail: errorDetail(error) });
   }
 }
 

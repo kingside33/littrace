@@ -19,6 +19,8 @@ export type FluentMessageId =
   | 'menu-feedback-compare-unknown'
   | 'menu-feedback-diagnostics-unavailable'
   | 'menu-feedback-headline'
+  | 'menu-feedback-parse-error'
+  | 'menu-feedback-parse-not-indexed'
   | 'menu-feedback-parse-submitted'
   | 'menu-feedback-parse-unknown'
   | 'menu-feedback-select-first'

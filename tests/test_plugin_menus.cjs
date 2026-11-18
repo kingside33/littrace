@@ -615,6 +615,32 @@ test("a compare run resolves every paper before it is submitted", () => {
   assert.match(menus, /resolvePaperId\(paperId\)/);
 });
 
+test("the parse command distinguishes unindexed from unselected", () => {
+  const menus = read(MENU_TS);
+  const start = menus.indexOf("async function runParse(");
+  const end = menus.indexOf("\nfunction runDiagnostics(", start);
+  assert.ok(start >= 0 && end > start, "runParse not found");
+  const body = menus.slice(start, end);
+  // The paper is resolved first (a legacy `doi:` id otherwise 400s), and the
+  // two failures get their own lines instead of borrowing the selection gate.
+  assert.match(body, /await resolvePaperId\(paper\)/);
+  assert.match(body, /FEEDBACK_KEYS\.parseNotIndexed/);
+  assert.match(body, /FEEDBACK_KEYS\.parseError/);
+  assert.equal(
+    (body.match(/FEEDBACK_KEYS\.selectFirst/g) || []).length,
+    1,
+    "selectFirst may only describe the no-selection branch",
+  );
+  assert.doesNotMatch(body, /"解析前解析文献"/);
+  // Both new lines are real Fluent keys.
+  const en = parseFtl("en-US");
+  const zh = parseFtl("zh-CN");
+  for (const key of ["menu-feedback-parse-not-indexed", "menu-feedback-parse-error"]) {
+    assert.ok(en.has(key), `en-US missing ${key}`);
+    assert.ok(zh.has(key), `zh-CN missing ${key}`);
+  }
+});
+
 test("the pure core has no Zotero or DOM globals", () => {
   const core = read(MENU_CORE);
   // Strip block comments and `*`/`//` lines first: the module's own

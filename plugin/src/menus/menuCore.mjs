@@ -768,6 +768,8 @@ export const FEEDBACK_KEYS = Object.freeze({
   compareError: "menu-feedback-compare-error",
   parseSubmitted: "menu-feedback-parse-submitted",
   parseUnknown: "menu-feedback-parse-unknown",
+  parseNotIndexed: "menu-feedback-parse-not-indexed",
+  parseError: "menu-feedback-parse-error",
   diagnosticsUnavailable: "menu-feedback-diagnostics-unavailable",
   tabUnavailable: "menu-feedback-tab-unavailable",
   selectFirst: "menu-feedback-select-first",
