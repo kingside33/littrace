@@ -34,7 +34,7 @@ git diff origin/main...HEAD --stat
   由集成管理员复核。
 - **提交纪律。** `git commit -s`(DCO 硬门禁,CI 读 `Signed-off-by` trailer);
   不加 Co-Authored-By 尾注;提交信息用 `type(scope): 中文标题`。squash 合并
-  时确认 trailer 保留(CONTRIBUTING.md「Squash merges」)。
+  时确认 trailer 保留(CONTRIBUTING.md「Pull requests」节的「Merge method」小节)。
 - **措辞纪律。** 插件壳(XPI 及其原生集成层)永久免费且 AGPL 开源;
   「编排层」一词专指 M3 商业编排层(收费物),不得出现在免费承诺里。
   免费功能的可用性依赖本地伴随服务:服务离线时入口明确禁用并给引导,
