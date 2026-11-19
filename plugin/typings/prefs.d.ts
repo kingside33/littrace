@@ -11,6 +11,7 @@ declare namespace _ZoteroTypes {
       "connection.port": string;
       "integration.column.lineage": boolean;
       "integration.column.reading": boolean;
+      "cache.dir": string;
       "pro.cross-check-report": boolean;
       "pro.parallel-driver": boolean;
     };

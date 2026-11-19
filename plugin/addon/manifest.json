@@ -7,7 +7,7 @@
   "author": "littrace contributors",
   "applications": {
     "zotero": {
-      "id": "littrace@example.invalid",
+      "id": "littrace@kingside33.github.io",
       "strict_min_version": "8.0",
       "strict_max_version": "10.0.*"
     }

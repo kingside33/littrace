@@ -11,7 +11,7 @@
   },
   "config": {
     "addonName": "littrace",
-    "addonID": "littrace@example.invalid",
+    "addonID": "littrace@kingside33.github.io",
     "addonRef": "littrace",
     "addonInstance": "Littrace",
     "prefsPrefix": "extensions.zotero.littrace"
