@@ -278,6 +278,7 @@ prefs-cloud-testing = Testing the connection…
 prefs-cloud-test-failed = The connection test did not run ({ $detail })
 prefs-cloud-clear-done = The saved key was cleared and cloud calls were turned off.
 prefs-cloud-clear-failed = The key was not cleared ({ $detail })
+prefs-cloud-key-platform-unsupported = This platform cannot protect a stored API key. Other fields save normally; see docs/support-matrix.json.
 prefs-cloud-model-not-listed = The configured model is not in the endpoint's model list.
 prefs-probe-detail = Service answer: { $detail }
 prefs-probe-proxy-fallback = The local proxy was not used; the system network answered.

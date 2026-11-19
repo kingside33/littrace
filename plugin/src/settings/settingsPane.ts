@@ -215,31 +215,45 @@ function readForm(doc: Document): Record<string, unknown> {
 }
 
 /**
- * Whether this platform can carry a key at all.
+ * Whether this platform can protect a stored key.
  *
- * docs/support-matrix.json is the platform authority; the reason is concrete —
- * kbapp/core/secrets.py raises RuntimeError for anything but Windows, so a
- * save here could only fail.
+ * docs/support-matrix.json is the platform authority. The reason is concrete
+ * but narrower than "the platform is unsupported": `protect()` in
+ * kbapp/core/secrets.py returns early for an empty value and only reaches the
+ * `os.name != 'nt'` guard for a **non-empty** key. So reading the settings,
+ * saving the address/model/prices and probing a keyless loopback endpoint all
+ * work off Windows — only storing a key does not.
  */
-function platformSupportsCloud(): boolean {
+function canProtectKey(): boolean {
   return platformCard(platformName()).supported;
 }
 
-/** Grey the whole group and show the reason card on an unsupported platform. */
-function applyPlatformGate(doc: Document): boolean {
-  if (platformSupportsCloud()) {
-    return true;
+/**
+ * Disable the one control that cannot work here, and show why.
+ *
+ * Deliberately narrower than greying the whole group: disabling everything
+ * would claim the free features of the group are unavailable on this platform,
+ * which is not true and cannot be acted on by the user.
+ */
+function applyKeyGate(doc: Document): void {
+  if (canProtectKey()) {
+    return;
   }
   const card = doc.getElementById(IDS.platform);
   if (card) {
     card.hidden = false;
   }
-  const group = doc.getElementById(IDS.group);
-  const controls = group ? Array.from(group.querySelectorAll("input, button, select")) : [];
-  for (const node of controls) {
-    (node as HTMLInputElement).disabled = true;
+  // The key box and its clear button are the two controls that write a secret.
+  for (const id of [IDS.key, IDS.clear]) {
+    const node = input(doc, id);
+    if (node) {
+      node.disabled = true;
+    }
   }
-  return false;
+  const clear = doc.getElementById(IDS.clear);
+  if (clear) {
+    (clear as unknown as HTMLButtonElement).disabled = true;
+  }
 }
 
 /** Per-pane generation; a newer action invalidates older answers. */
@@ -263,11 +277,7 @@ function stillCurrent(doc: Document, generation: number): boolean {
  */
 export async function loadCloud(doc: Document): Promise<void> {
   const generation = nextGeneration(doc);
-  if (!applyPlatformGate(doc)) {
-    // The rows exist but stay disabled. No request runs on an unsupported
-    // platform: it could not be acted on, and an unsolicited request is a bug.
-    return;
-  }
+  applyKeyGate(doc);
   setStatus(doc, "loading");
   try {
     const data = await serviceClient().get("/api/settings");
@@ -288,10 +298,13 @@ export async function loadCloud(doc: Document): Promise<void> {
 /** Save the form, then re-read so every row reflects what the service stored. */
 export async function saveCloud(doc: Document): Promise<void> {
   const generation = nextGeneration(doc);
-  if (!platformSupportsCloud()) {
+  const payload = savePayloadFrom(readForm(doc));
+  if (!canProtectKey() && typeof payload.api_key === "string" && payload.api_key.length > 0) {
+    // The one write that cannot succeed here. Refuse it locally with a readable
+    // line instead of letting the service answer a opaque 500.
+    setStatus(doc, "saveFailed", { detail: t("prefs-cloud-key-platform-unsupported") });
     return;
   }
-  const payload = savePayloadFrom(readForm(doc));
   setStatus(doc, "saving");
   try {
     await serviceClient().post("/api/settings", payload);
@@ -318,7 +331,11 @@ export async function saveCloud(doc: Document): Promise<void> {
 /** Delete the stored key; the payload also turns cloud calls off. */
 export async function clearKey(doc: Document): Promise<void> {
   const generation = nextGeneration(doc);
-  if (!platformSupportsCloud()) {
+  if (!canProtectKey()) {
+    // Clearing is a write of an empty key, which needs no DPAPI. But the
+    // control is disabled here because the button only makes sense next to a
+    // key this platform could never have stored — say so rather than no-op.
+    setStatus(doc, "clearFailed", { detail: t("prefs-cloud-key-platform-unsupported") });
     return;
   }
   const hint = doc.getElementById(IDS.clearHint);
@@ -348,9 +365,8 @@ export async function clearKey(doc: Document): Promise<void> {
 /** Probe the saved endpoint. Only ever runs from a click. */
 export async function testCloud(doc: Document): Promise<void> {
   const generation = nextGeneration(doc);
-  if (!platformSupportsCloud()) {
-    return;
-  }
+  // No platform gate: probing reads the saved configuration and sends no
+  // secret of its own, so it works wherever the service does.
   setStatus(doc, "testing");
   try {
     const data = await serviceClient().post("/api/settings/test");
@@ -396,6 +412,21 @@ export function mountCloud(doc: Document): void {
   const mode = doc.getElementById(IDS.mode);
   if (mode) {
     mode.addEventListener("change", () => applyBudgetMode(doc));
+  }
+  // Re-read whenever the pane is shown again.
+  //
+  // `preferences.js` guards pane loading with a `loaded` flag and signals
+  // re-entry with a `showing` event, so `onPaneLoad` may run only once per
+  // preferences window. Uncertain in enough Zotero builds that the cheap
+  // defence is worth it: a second read costs one local GET and only ever
+  // refreshes stale values. Edits in progress are safe because the generation
+  // counter makes a later user action win.
+  const root = doc.getElementById(IDS.group);
+  const paneRoot = root ? root.parentElement : null;
+  if (paneRoot && typeof paneRoot.addEventListener === "function") {
+    paneRoot.addEventListener("showing", () => {
+      void loadCloud(doc);
+    });
   }
   void loadCloud(doc);
 }

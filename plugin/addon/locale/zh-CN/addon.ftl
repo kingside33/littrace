@@ -274,6 +274,7 @@ prefs-cloud-testing = 正在测试连接…
 prefs-cloud-test-failed = 连接测试未能执行({ $detail })
 prefs-cloud-clear-done = 已清除保存的密钥,并关闭云端调用。
 prefs-cloud-clear-failed = 密钥未能清除({ $detail })
+prefs-cloud-key-platform-unsupported = 本平台无法保护保存的 API 密钥。其余字段可正常保存;平台口径见 docs/support-matrix.json。
 prefs-cloud-model-not-listed = 配置的模型不在该端点的模型列表中。
 prefs-probe-detail = 服务说明:{ $detail }
 prefs-probe-proxy-fallback = 本地代理未使用;由系统网络完成连接。
