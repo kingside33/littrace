@@ -42,6 +42,16 @@
     "tested_versions": [],
     "note": "littrace reads zotero.sqlite, item metadata, collections, attachments, notes and annotations through a read-only SQLite snapshot, and never writes to Zotero. The local schema differs across Zotero releases. Read-only access has been exercised against a working local library, but the exact Zotero release was not recorded; no specific version is pinned yet. A release will be listed in tested_versions only after an end-to-end sync against a real library. The future Zotero plugin will get its own plugin x Zotero version matrix."
   },
+  "plugin": {
+    "status": "unverified",
+    "strict_min_version": "8.0",
+    "strict_max_version": "10.0.*",
+    "tested_versions": [
+      "10.0.8"
+    ],
+    "channel": "GitHub Releases + self-hosted updates.json",
+    "note": "The Zotero plugin (plugin/, XPI) runs inside Zotero and loads the local service pages in function tabs. Verification on 2026-11-19 used Zotero 10.0.8 (x64 en-US) on Windows with an isolated profile and a read-only snapshot of a real library (412 items); see docs/plugin-verification.md for the per-item record and what remains unverified. status stays \"unverified\" until every M0 gate item and the M1 UI checklist have been signed off by the maintainer: tab rendering, version negotiation and the item-pane sections passed, while the lineage column, the reader panel, deep links, concurrent writes and schema migration are not yet verified. tested_versions lists only releases that were actually exercised. strict_max_version uses the x.x.* form so a compatibility bump can ship through updates.json without republishing the XPI."
+  },
   "ollama": {
     "status": "unverified",
     "endpoint": "http://127.0.0.1:11434",
