@@ -162,3 +162,62 @@ status-diag-sync-synced = 已完成
 status-diag-sync-running = 进行中
 status-diag-sync-failed = 失败
 status-diag-sync-unknown = 状态未知
+
+# 条目右键 / Tools 菜单与离线降级引导(U6)。key 不带构建前缀;
+# 构建时统一加 "littrace-",所以插件代码里的 t() 与菜单 l10nID 都走 ftlId()。
+menu-item-root = littrace
+menu-item-evidence = 查证据
+menu-item-compare-add = 加入对比集
+menu-item-compare-run = 与对比集对比
+menu-item-compare-clear = 清空对比集
+menu-item-locate = 在谱系中定位
+menu-item-parse = 解析此文献
+menu-item-open-graph = 打开研究谱系 tab
+menu-item-open-offline-graph = 打开离线图谱
+menu-item-diagnostics = 服务诊断
+menu-item-guide = 本地服务未运行 — 查看启动引导
+menu-item-guide-incompatible = 本地服务版本不兼容 — 查看处理引导
+menu-gate-checking = 正在检查本地服务
+menu-gate-offline = 本地服务未运行
+menu-gate-incompatible = 本地服务版本不兼容
+menu-gate-selection = 先在文献列表中选中条目
+menu-gate-selection-single = 这个入口一次只处理一篇文献
+menu-gate-compare-size = 对比需要 2 至 4 篇文献
+menu-gate-compare-full = 对比集已满(4 篇)
+menu-blocked-offline-graph = 离线图谱入口等待服务端提供只读路由,本版本不注册该菜单项
+
+# 离线降级引导卡。体积与时长预算来自首次使用说明,措辞保持一致。
+menu-guide-title = littrace 本地服务未运行
+menu-guide-title-incompatible = littrace 本地服务版本不兼容
+menu-guide-body-offline = 这些入口都由本机的 littrace 本地服务提供;插件本身不内置服务,服务离线时也不给出半成品结果。
+menu-guide-body-incompatible = 本机 littrace 服务可以连接,但版本与本插件不兼容。请更新本地服务后点「重新检查」。
+menu-guide-body-start = 启动方式:在 littrace 项目目录运行 python kb.py serve,然后回到 Zotero 点「重新检查」。
+menu-guide-budget-size = 体积预算:服务安装为数百 MB 级(嵌入 Python 运行时与依赖);Ollama 模型为 GB 级,需要你自行安装;插件本体(XPI)只有 MB 级。
+menu-guide-budget-time = 时长预算:首次建库与向量化以十分钟计,模型下载时间取决于网络。
+menu-guide-body-no-half = 服务离线时,除本引导与「服务诊断」外的入口全部保持置灰,不会出现只做一半的功能。
+menu-guide-open-settings = 打开设置页
+menu-guide-recheck = 重新检查
+menu-guide-close = 关闭
+menu-guide-status-checking = 正在重新检查本地服务…
+menu-guide-status-online = 本地服务已可用:重新打开菜单即可使用各入口。
+menu-guide-status-incompatible = 服务版本仍不兼容,请更新本地服务。
+menu-guide-status-offline = 仍然连不上本地服务。
+
+# 菜单命令的即时反馈(ProgressWindow 一行)。
+menu-feedback-headline = littrace
+menu-feedback-compare-added = 已加入对比集:{ $count } 篇(2 至 4 篇可对比)
+menu-feedback-compare-partial = 已加入 { $count } 篇;另有 { $full } 篇因对比集已满(最多 4 篇)未加入
+menu-feedback-compare-duplicate = 所选文献已经在对比集里
+menu-feedback-compare-full = 对比集已满(4 篇);先「清空对比集」再加入
+menu-feedback-compare-cleared = 已清空对比集
+menu-feedback-compare-submitted = 已提交对比任务,可在研究调度台查看
+menu-feedback-compare-unknown = 服务未确认对比任务,请稍后在调度台查看
+menu-feedback-compare-unindexed = 有 { $count } 篇文献还没有入库(本地服务里查不到),先运行 python kb.py update 入库后再对比
+menu-feedback-compare-error = 对比未提交:服务返回错误({ $detail })
+menu-feedback-parse-submitted = 已提交解析任务
+menu-feedback-parse-unknown = 服务未确认解析任务,请稍后在调度台查看
+menu-feedback-parse-not-indexed = 这篇文献还没有入库(本地服务里查不到),先运行 python kb.py update 入库后再解析
+menu-feedback-parse-error = 解析未提交:服务返回错误({ $detail })
+menu-feedback-diagnostics-unavailable = 当前窗口没有诊断面板;已打开 littrace 设置页查看服务健康
+menu-feedback-tab-unavailable = 无法打开 littrace 功能页
+menu-feedback-select-first = 先在文献列表中选中可用条目

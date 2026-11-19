@@ -35,11 +35,14 @@ export function initLocale(): void {
  * Look up one Fluent message. Keys are written without the build prefix
  * everywhere in `src/`, so the prefix is added here and nowhere else.
  *
+ * `args` feeds Fluent variables (`{ $count }`); a message without variables
+ * ignores it. Optional so every existing call site is unchanged.
+ *
  * A missing message must be visible, not a blank button: fall back to the
  * raw key rather than an empty string, and log the miss so a forgotten FTL
  * entry shows up in the Zotero console during real-machine acceptance.
  */
-export function t(key: string): string {
+export function t(key: string, args?: Record<string, unknown>): string {
   const id = messageId(key, config.addonRef);
   if (!l10n) {
     Zotero.logError(
@@ -47,7 +50,10 @@ export function t(key: string): string {
     );
     return id;
   }
-  const [message] = l10n.formatMessagesSync([{ id }]);
+  // Only pass `args` when there is one: an explicit `undefined` is legal but
+  // reads like a forgotten value the next time someone edits this.
+  const request = args ? { id, args } : { id };
+  const [message] = l10n.formatMessagesSync([request]);
   if (!message || message.value === null) {
     Zotero.logError(new Error(`littrace: missing Fluent message "${id}"`));
     return id;

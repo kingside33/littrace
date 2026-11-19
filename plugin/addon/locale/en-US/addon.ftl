@@ -165,3 +165,63 @@ status-diag-sync-synced = synced
 status-diag-sync-running = in progress
 status-diag-sync-failed = failed
 status-diag-sync-unknown = state unknown
+
+# Item context menu / Tools menu and the offline guide card (U6). Keys are
+# bare in the .ftl; the build prefixes them with the addon namespace, so both
+# t() and the MenuManager l10nID go through ftlId().
+menu-item-root = littrace
+menu-item-evidence = Search evidence
+menu-item-compare-add = Add to comparison set
+menu-item-compare-run = Compare the set
+menu-item-compare-clear = Clear comparison set
+menu-item-locate = Locate in lineage
+menu-item-parse = Parse this paper
+menu-item-open-graph = Open the research lineage tab
+menu-item-open-offline-graph = Open the offline graph
+menu-item-diagnostics = Service diagnostics
+menu-item-guide = Local service is not running — see how to start it
+menu-item-guide-incompatible = Local service version is not compatible — see what to do
+menu-gate-checking = checking the local service
+menu-gate-offline = the local service is not running
+menu-gate-incompatible = the local service version is not compatible
+menu-gate-selection = select items in the library first
+menu-gate-selection-single = this entry handles exactly one paper
+menu-gate-compare-size = comparing needs 2 to 4 papers
+menu-gate-compare-full = the comparison set is full (4)
+menu-blocked-offline-graph = the offline-graph entry waits for a read-only service route; this build does not register it
+
+# Offline guide card. The size/time budget mirrors the first-run note.
+menu-guide-title = The littrace local service is not running
+menu-guide-title-incompatible = The littrace local service version is not compatible
+menu-guide-body-offline = These entries are served by the littrace local service on this machine. The plugin bundles no service, and it never offers half a result while the service is offline.
+menu-guide-body-incompatible = The local littrace service answers, but its version is not compatible with this plugin. Update the service, then press 「Recheck」.
+menu-guide-body-start = To start it: run python kb.py serve in the littrace project directory, then press 「Recheck」 in Zotero.
+menu-guide-budget-size = Size budget: the service install is hundreds of MB (embedded Python runtime and dependencies); Ollama models are GB-scale and installed by you; the plugin itself (XPI) is a few MB.
+menu-guide-budget-time = Time budget: the first index build and vectorization take about ten minutes; model downloads depend on your network.
+menu-guide-body-no-half = While the service is offline every entry except this guide and 「Service diagnostics」 stays greyed out; no entry ever degrades into half a feature.
+menu-guide-open-settings = Open settings
+menu-guide-recheck = Recheck
+menu-guide-close = Close
+menu-guide-status-checking = Rechecking the local service…
+menu-guide-status-online = The local service is available: reopen the menu to use the entries.
+menu-guide-status-incompatible = The service version is still incompatible; update the local service.
+menu-guide-status-offline = Still cannot reach the local service.
+
+# Immediate feedback for menu commands (one ProgressWindow line).
+menu-feedback-headline = littrace
+menu-feedback-compare-added = Added to the comparison set: { $count } paper(s) (2 to 4 can be compared)
+menu-feedback-compare-partial = Added { $count } paper(s); { $full } more were not added because the set is full (at most 4)
+menu-feedback-compare-duplicate = The selected papers are already in the comparison set
+menu-feedback-compare-full = The comparison set is full (4); clear it first
+menu-feedback-compare-cleared = Comparison set cleared
+menu-feedback-compare-submitted = Comparison task submitted; see the research dashboard
+menu-feedback-compare-unknown = The service did not confirm the comparison task; check the dashboard later
+menu-feedback-compare-unindexed = { $count } paper(s) are not in the library yet; run python kb.py update first and compare again
+menu-feedback-compare-error = Comparison was not submitted: the service answered with an error ({ $detail })
+menu-feedback-parse-submitted = Parse task submitted
+menu-feedback-parse-unknown = The service did not confirm the parse task; check the dashboard later
+menu-feedback-parse-not-indexed = This paper is not in the library yet; run python kb.py update first and parse again
+menu-feedback-parse-error = Parse was not submitted: the service answered with an error ({ $detail })
+menu-feedback-diagnostics-unavailable = This window has no diagnostics panel; the littrace settings page was opened instead
+menu-feedback-tab-unavailable = Could not open the littrace page
+menu-feedback-select-first = Select a usable library item first

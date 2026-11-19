@@ -6,6 +6,7 @@ import { createItemSections, disposeItemSections } from "./itemSections";
 import { createReadingColumn } from "./columns/reading";
 import { createStatusDot } from "./status/status";
 import { prefBool, registerPreferencePane } from "./prefs/prefs";
+import { createMenus } from "./menus/menus";
 
 /**
  * The single registration entry of the plugin.
@@ -167,6 +168,16 @@ export function registerWindowIndependent(): void {
   // window would be a duplicate-id failure in preferencePanes.js. The pane id
   // resolves asynchronously; the disposer handles both orders.
   registerGlobal("preference-pane", registerPreferencePane());
+  // The item / tools menus and the offline guide card (U6). Process-wide for
+  // the same reason as the pane: Zotero.MenuManager keeps one registry keyed
+  // by menuID and injects it into every main window's popups from there
+  // (xpcom/pluginAPI/menuManager.js), so a per-window registration would be a
+  // duplicate id. Commands resolve the window from the menu element the hook
+  // hands them, never from a captured one.
+  const menus = createMenus();
+  registerGlobal("menus", () => {
+    menus.dispose();
+  });
 }
 
 /**
