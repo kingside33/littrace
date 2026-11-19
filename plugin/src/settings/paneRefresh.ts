@@ -3,7 +3,7 @@ import { serviceClient } from "../service-client";
 import { collectDiagnostics } from "../status/diagnostics";
 import { probeHealth } from "../status/diagnostics";
 import { serviceBaseUrlFromPrefs } from "../prefs/serviceOrigin";
-import { dotView } from "../status/statusCore.mjs";
+import { dotView, offlineHealth } from "../status/statusCore.mjs";
 import { settingsViewFrom } from "./settingsCore.mjs";
 import { formatBytes } from "../prefs/prefsCore.mjs";
 import type { SettingsView } from "./settingsCore.mjs";
@@ -104,16 +104,16 @@ export async function collectPaneSnapshot(): Promise<PaneSnapshot> {
     settingsError = error;
   }
   let rows: unknown = null;
-  // The two extra reads only happen when the service answered as compatible;
-  // asking an incompatible service for data it may not serve is what
-  // status/diagnostics.ts avoids, and this keeps that rule in one place.
-  if (health && health.state === "available") {
-    try {
-      const snapshot = await collectDiagnostics();
-      rows = snapshot.rows;
-    } catch (error) {
-      report(error, "服务诊断");
-    }
+  // Exactly one `/api/version` per page refresh: the diagnostics are handed the
+  // verdict this function already has, including the offline fallback, so a
+  // throwing probe cannot trigger a second one inside collectDiagnostics.
+  // Only the two extra GETs are gated on compatibility — the rows themselves
+  // are always built, because 「版本过旧」 is exactly when that line matters.
+  try {
+    const snapshot = await collectDiagnostics({ health: health ?? offlineHealth() });
+    rows = snapshot.rows;
+  } catch (error) {
+    report(error, "服务诊断");
   }
   return { health, settings, settingsError, rows, baseUrl };
 }

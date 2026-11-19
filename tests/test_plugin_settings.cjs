@@ -523,10 +523,25 @@ test("the version line reuses the diagnostics rows instead of probing twice", as
     assert.equal(empty.relationKey, null);
   }
 
-  // The adapter reads the snapshot the health refresh already collects.
+  // The rows come from the page's single refresh, and from the shared
+  // diagnostics helper — not from a second probe of its own.
   const source = read(path.join(PLUGIN_DIR, "src", "settings", "connectionPane.ts"));
-  assert.match(source, /collectDiagnostics\(\)/);
   assert.match(source, /versionViewFrom\(/);
+  assert.doesNotMatch(
+    source,
+    /collectDiagnostics|probeHealth/,
+    "connectionPane must render rows handed to it, not collect its own",
+  );
+  // The page hands the diagnostics the verdict it already has, so `/api/version`
+  // is requested once; and the rows are built for every health state, because
+  // 「版本过旧」 is exactly when the version line matters.
+  const pane = read(PANE_REFRESH_TS);
+  assert.match(pane, /collectDiagnostics\(\{\s*health:/);
+  assert.doesNotMatch(
+    pane,
+    /health\.state === "available"[\s\S]{0,120}?collectDiagnostics/,
+    "the row builder must not be gated on compatibility",
+  );
 });
 
 test("the connection group opens what the shell already opens, never its own path", () => {
@@ -551,8 +566,23 @@ test("the connection group opens what the shell already opens, never its own pat
     .filter((line) => !/^\s*(?:\/\/|\*|\/\*)/.test(line))
     .join("\n");
   assert.doesNotMatch(codeLines, /nsIFilePicker/, "the bare XPCOM picker must not be used");
-  // A picker failure must not block the field.
-  assert.match(source, /data-picker-failed/);
+  // `FilePicker` is an ES module export, not a window global. Reaching for
+  // `doc.defaultView.FilePicker` finds undefined on every Zotero build, which
+  // would leave the button permanently dead behind a guard.
+  assert.match(codeLines, /importESModule\(/);
+  assert.match(codeLines, /chrome:\/\/zotero\/content\/modules\/filePicker\.mjs/);
+  assert.doesNotMatch(
+    codeLines,
+    /defaultView[^\n]*\.FilePicker|FilePicker\s*=\s*view\?\./,
+    "FilePicker must come from the module, never from a window property",
+  );
+  // A picker failure must be visible. A bare `data-picker-failed` attribute has
+  // no consumer and no style: the user would see nothing at all.
+  assert.match(codeLines, /prefs-zotero-dir-picker-failed/);
+  assert.match(codeLines, /showPickerFailure\(/);
+  // ...and the hint element it writes into exists in the pane.
+  const markup = read(path.join(PLUGIN_DIR, "addon", "content", "preferences.xhtml"));
+  assert.match(markup, /id="littrace-prefs-zotero-dir-picker-hint" hidden="true"/);
 });
 
 test("only the key write is gated off Windows, not the whole group", () => {
@@ -623,14 +653,39 @@ test("the whole page refreshes from one snapshot, not one read per group", () =>
   const settingsGets = [...pane.matchAll(/serviceClient\(\)\.get\("\/api\/settings"\)/g)];
   assert.equal(settingsGets.length, 1, "the page reads settings once, not once per group");
 
-  // Exactly one probe, and the diagnostics' extra reads hang off it.
+  // Exactly one probe in the page, and the diagnostics are handed its verdict
+  // rather than probing again. Counting `probeHealth()` text in this one file
+  // was a false anchor before: the duplicate lived inside collectDiagnostics
+  // and the count could not see it. So this checks both halves of the seam.
   const probes = [...pane.matchAll(/probeHealth\(\)/g)];
-  assert.equal(probes.length, 1, "the page probes the version once, not once per group");
-  assert.match(pane, /collectDiagnostics\(\)/);
+  assert.equal(probes.length, 1, "the page probes the version once");
   assert.match(
     pane,
-    /health\.state === "available"[\s\S]{0,200}?collectDiagnostics\(\)/,
-    "the extra diagnostic reads only run when the service answered as compatible",
+    /collectDiagnostics\(\{\s*health:\s*health \?\? offlineHealth\(\)\s*\}\)/,
+    "the diagnostics must receive the verdict this module already probed, including the offline fallback",
+  );
+  // And the receiving side must honour it: with a health handed in, no probe.
+  const diagnostics = read(path.join(PLUGIN_DIR, "src", "status", "diagnostics.ts"));
+  const collect = diagnostics.slice(diagnostics.indexOf("export async function collectDiagnostics"));
+  const collectBody = collect.slice(0, collect.indexOf("\nexport ", 1));
+  assert.match(
+    collectBody,
+    /if \(options\.health\) \{\s*health = options\.health;\s*\} else \{[\s\S]{0,200}?probeHealth\(\)/,
+    "collectDiagnostics probes only when it was not given a verdict",
+  );
+  // The rows are built for every health state; only the two extra GETs are
+  // gated. Gating the row builder left the version line blank exactly when it
+  // said 「版本过旧」 — the one case it exists for.
+  assert.match(
+    collectBody,
+    /const reachable = health\.state === "available";/,
+    "only reachability of the two extra reads is gated",
+  );
+  assert.match(collectBody, /diagnosticRows\(\{ health, baseUrl, models, status \}\)/);
+  assert.doesNotMatch(
+    pane,
+    /health\.state === "available"[\s\S]{0,120}?collectDiagnostics/,
+    "paneRefresh must not gate the row builder on compatibility",
   );
 
   // Neither group may read on its own any more.
@@ -689,6 +744,57 @@ test("the whole page refreshes from one snapshot, not one read per group", () =>
   // ...and the cache row is actually painted by it.
   assert.match(pane, /prefs-cache-current/);
   assert.match(pane, /renderCache\(doc, snapshot\.settings\)/);
+});
+
+test("the pane actually mounts both groups and its refresh", () => {
+  // Delete every mount call and the rest of this file stays green: the other
+  // assertions all read the group modules, never the place that uses them. This
+  // is the anchor that notices the feature being unwired.
+  const prefs = read(PREFS_TS);
+  const onPaneLoad = prefs.slice(prefs.indexOf("onPaneLoad(doc: Document)"));
+  const body = onPaneLoad.slice(0, onPaneLoad.indexOf("\n  },", 1));
+  for (const call of ["mountCloud(doc);", "mountConnection(doc);", "mountPane(doc);"]) {
+    assert.ok(body.includes(call), `onPaneLoad must call ${call}`);
+  }
+  for (const name of ["mountCloud", "mountConnection", "mountPane"]) {
+    assert.match(prefs, new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from`));
+  }
+  // Every element id a group looks up must exist in the markup, or the row is a
+  // silent no-op on a real machine.
+  const markup = read(path.join(PLUGIN_DIR, "addon", "content", "preferences.xhtml"));
+  for (const source of [CONNECTION_PANE_TS, SETTINGS_PANE_TS]) {
+    const ids = new Set(
+      [...read(source).matchAll(/"littrace-prefs-[a-z-]+"/g)].map((m) => m[0].slice(1, -1)),
+    );
+    for (const id of ids) {
+      assert.ok(
+        markup.includes(`id="${id}"`),
+        `${path.basename(source)} looks up #${id}, which the pane does not declare`,
+      );
+    }
+  }
+});
+
+test("a first read reports 「已载入」, never 「设置已保存」", () => {
+  // The status row claimed a save the user never made, on the very first open
+  // of the pane. A load and a save are different events and now say so.
+  const source = read(SETTINGS_PANE_TS);
+  const renderCloud = source.slice(source.indexOf("export function renderCloud"));
+  // Line-ending independent: slice to the next declaration rather than
+  // matching "\n}\n", which never appears in a CRLF checkout.
+  const renderEnd = renderCloud.indexOf("export function", 10);
+  const body = renderEnd > 0 ? renderCloud.slice(0, renderEnd) : renderCloud;
+  assert.match(body, /setStatus\(doc, "loaded"\)/);
+  assert.doesNotMatch(
+    body,
+    /setStatus\(doc, "saved"\)/,
+    "a read must not claim the settings were saved",
+  );
+  // The save path still says so.
+  const saveCloud = source.slice(source.indexOf("export async function saveCloud"));
+  const saveEnd = saveCloud.indexOf("export async function", 10);
+  const saveBody = saveEnd > 0 ? saveCloud.slice(0, saveEnd) : saveCloud;
+  assert.match(saveBody, /setStatus\(doc, "saved"\)/);
 });
 
 test("the probe budget is strictly below the plugin's request timeout", async () => {

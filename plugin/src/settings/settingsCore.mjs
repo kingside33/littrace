@@ -409,6 +409,7 @@ export const PANE_FLUENT_KEYS = Object.freeze([
   "prefs-cloud-saving",
   "prefs-cloud-saved",
   "prefs-cloud-loading",
+  "prefs-cloud-loaded",
   "prefs-cloud-load-failed",
   "prefs-cloud-save-failed",
   "prefs-cloud-testing",

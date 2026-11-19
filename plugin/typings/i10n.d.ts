@@ -94,6 +94,7 @@ export type FluentMessageId =
   | 'prefs-cloud-key-desc'
   | 'prefs-cloud-key-platform-unsupported'
   | 'prefs-cloud-load-failed'
+  | 'prefs-cloud-loaded'
   | 'prefs-cloud-loading'
   | 'prefs-cloud-model'
   | 'prefs-cloud-model-desc'

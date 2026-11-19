@@ -68,6 +68,7 @@ const LIMITED_ONLY = [IDS.budget, IDS.inputPrice, IDS.outputPrice];
 /** Lifecycle strings the status row can show. */
 const STATUS_ROLES = {
   loading: "prefs-cloud-loading",
+  loaded: "prefs-cloud-loaded",
   loadFailed: "prefs-cloud-load-failed",
   saving: "prefs-cloud-saving",
   saved: "prefs-cloud-saved",
@@ -285,7 +286,7 @@ export async function loadCloud(doc: Document): Promise<void> {
       return;
     }
     fillForm(doc, settingsViewFrom(data));
-    setStatus(doc, "saved");
+    setStatus(doc, "loaded");
   } catch (error) {
     if (!stillCurrent(doc, generation)) {
       return;
@@ -309,7 +310,9 @@ export function renderCloud(doc: Document, view: SettingsView | null, error: unk
     return;
   }
   fillForm(doc, view);
-  setStatus(doc, "saved");
+  // A load is not a save: this row must not claim 「设置已保存」 for an action
+  // the user never took.
+  setStatus(doc, "loaded");
 }
 
 /** Drop the form's DOM state when the pane closes. */

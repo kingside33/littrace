@@ -281,6 +281,7 @@ prefs-cloud-test = Test connection
 prefs-cloud-clear = Clear saved key
 prefs-cloud-clear-hint = Clearing the key also turns cloud calls off.
 prefs-cloud-loading = Reading current settings…
+prefs-cloud-loaded = Current settings loaded. The key is never shown.
 prefs-cloud-load-failed = Could not read the current settings ({ $detail })
 prefs-cloud-saving = Saving…
 prefs-cloud-saved = Settings saved. The key is never echoed back.

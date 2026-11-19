@@ -277,6 +277,7 @@ prefs-cloud-test = 测试连接
 prefs-cloud-clear = 清除已保存密钥
 prefs-cloud-clear-hint = 清除密钥会同时关闭云端调用。
 prefs-cloud-loading = 正在读取当前设置…
+prefs-cloud-loaded = 已载入当前设置。密钥不会显示。
 prefs-cloud-load-failed = 无法读取当前设置({ $detail })
 prefs-cloud-saving = 正在保存…
 prefs-cloud-saved = 设置已保存。密钥不会回显。

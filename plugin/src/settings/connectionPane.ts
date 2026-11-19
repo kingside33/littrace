@@ -1,7 +1,6 @@
 import { t } from "../utils/locale";
 import { serviceClient } from "../service-client";
 import { serviceBaseUrlFromPrefs } from "../prefs/serviceOrigin";
-import { collectDiagnostics } from "../status/diagnostics";
 import { openWindowDiagnostics } from "../status/status";
 import { canOpenHostLink, openHostLink } from "../tabs/tabs";
 import { savePayloadFrom, settingsViewFrom, versionViewFrom } from "./settingsCore.mjs";
@@ -30,6 +29,7 @@ const IDS = {
   version: "littrace-prefs-version",
   zoteroDir: "littrace-prefs-zotero-dir",
   choose: "littrace-prefs-zotero-dir-choose",
+  pickerHint: "littrace-prefs-zotero-dir-picker-hint",
   workbench: "littrace-prefs-open-workbench",
   diagnostics: "littrace-prefs-open-diagnostics",
 } as const;
@@ -128,43 +128,83 @@ export async function saveZoteroDir(doc: Document): Promise<void> {
 /**
  * Open Zotero's own directory picker.
  *
- * `window.FilePicker` is Zotero's Promise wrapper around nsIFilePicker
- * (chrome/content/zotero/modules/filePicker.mjs). The bare XPCOM object is the
- * wrong tool here: its `init()` takes a browsing context, so passing a Window
- * raises NS_ERROR_INVALID_ARG. There is no other picker in this repository, so
- * this path is a real-machine acceptance item, not a tested one.
+ * `FilePicker` is **not** a global on the preferences window: it is an ES
+ * module export. Zotero's own preferences panes load it the same way —
+ * `chrome/content/zotero/preferences/preferences_advanced.js` does
+ * `var { FilePicker } = ChromeUtils.importESModule('chrome://zotero/content/modules/filePicker.mjs')`.
+ * Reaching for `doc.defaultView.FilePicker` finds `undefined` every time, which
+ * would leave the button permanently dead with nothing but a console line.
  *
- * A failure degrades visibly but does not block: the field itself is editable.
+ * The bare XPCOM `nsIFilePicker` is also wrong here: its `init()` takes a
+ * browsing context, so passing a window raises NS_ERROR_INVALID_ARG. Zotero's
+ * wrapper does that unwrapping itself, which is why it takes the window back.
+ *
+ * There is no other picker in this repository, so this path stays a real-machine
+ * acceptance item. A failure is reported **and** written into the field's own
+ * hint line, so the user is not left with a button that silently does nothing.
  */
 export async function chooseZoteroDir(doc: Document): Promise<void> {
   const box = inputOf(doc, IDS.zoteroDir);
-  const view = doc.defaultView as unknown as { FilePicker?: new () => any } | null;
-  const FilePicker = view?.FilePicker;
-  if (typeof FilePicker !== "function") {
-    report(new Error("Zotero.FilePicker 不可用"), "选择数据目录");
+  const pickerModule = loadFilePickerModule();
+  if (!pickerModule) {
+    showPickerFailure(doc);
+    report(new Error("chrome://zotero/content/modules/filePicker.mjs 不可用"), "选择数据目录");
     return;
   }
   let picked: string | null = null;
   try {
-    const picker = new FilePicker();
-    picker.init(view, t("prefs-zotero-dir-picker-title"), picker.modeGetFolder);
+    const picker = new pickerModule.FilePicker();
+    picker.init(doc.defaultView, t("prefs-zotero-dir-picker-title"), picker.modeGetFolder);
     if ((await picker.show()) !== picker.returnOK) {
       return;
     }
     picked = typeof picker.file === "string" ? picker.file : String(picker.file ?? "");
   } catch (error) {
+    showPickerFailure(doc);
     report(error, "选择数据目录");
-    if (box) {
-      box.setAttribute("data-picker-failed", "true");
-    }
     return;
   }
   if (!picked || !box) {
     return;
   }
   box.value = picked;
-  box.removeAttribute("data-picker-failed");
+  const hint = doc.getElementById(IDS.pickerHint);
+  if (hint) {
+    hint.hidden = true;
+  }
   await saveZoteroDir(doc);
+}
+
+/** The Zotero filePicker module, or null when this build does not have it. */
+function loadFilePickerModule(): { FilePicker: new () => any } | null {
+  const chromeUtils = (globalThis as { ChromeUtils?: { importESModule?: (uri: string) => unknown } })
+    .ChromeUtils;
+  if (typeof chromeUtils?.importESModule !== "function") {
+    return null;
+  }
+  try {
+    const mod = chromeUtils.importESModule(
+      "chrome://zotero/content/modules/filePicker.mjs",
+    ) as { FilePicker?: new () => any } | null;
+    return mod && typeof mod.FilePicker === "function" ? { FilePicker: mod.FilePicker } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Make a picker failure visible.
+ *
+ * The pane already has a Fluent string for this, and the field stays editable —
+ * a silent no-op is the one outcome the repository's 「an entry either works or
+ * says why」 rule forbids.
+ */
+function showPickerFailure(doc: Document): void {
+  const hint = doc.getElementById(IDS.pickerHint);
+  if (hint) {
+    hint.hidden = false;
+    hint.textContent = t("prefs-zotero-dir-picker-failed");
+  }
 }
 
 /** Open the web workbench in the user's browser. */
@@ -217,15 +257,5 @@ export function mountConnection(doc: Document): void {
   const diagnostics = buttonOf(doc, IDS.diagnostics);
   if (diagnostics) {
     diagnostics.addEventListener("click", () => openDiagnostics(doc));
-  }
-}
-
-/** Re-read from the shared pane refresh (the `showing` path). */
-export async function refreshConnection(doc: Document): Promise<void> {
-  try {
-    const snapshot = await collectDiagnostics();
-    renderConnection(doc, undefined, snapshot.rows);
-  } catch (error) {
-    report(error, "读取服务版本");
   }
 }
