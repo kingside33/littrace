@@ -303,6 +303,48 @@ layer does.
   [`SECURITY.md`](SECURITY.md).
 - A feature request is a discussion, not a roadmap commitment.
 
+## Lessons (错题本)
+
+[`docs/lessons.md`](docs/lessons.md) records mistakes that cost time and
+practices worth copying. It is a queue for rules, not a diary: an entry that
+recurs is promoted into a binding rule, and an entry that no longer applies is
+deleted.
+
+Read the entries relevant to your change before you start and when you review.
+Write only in a separate `docs(lessons)` pull request; feature pull requests
+must not touch the file. The format:
+
+```markdown
+### L-001 <one actionable rule, at most 60 characters>
+- 类: 别这样
+- Seen: 2026-11-12, 2026-11-19
+- 为什么: <what happened and what it cost>
+- 证据: #58, #64
+```
+
+- `类` is `别这样` (do not do this) or `照这样` (do this).
+- `Seen` lists distinct dates in ascending order; do not repeat a date.
+- `证据` lists issue or pull request numbers only. This repository files an
+  issue before a fix, so a defect always has a traceable origin.
+- Numbers are unique and only increase; never reuse one.
+
+Promotion: after the same lesson appears on three distinct dates, write the rule
+into [`AGENTS.md`](AGENTS.md), this file, or a new ADR, and compress the entry
+to a single pointer line: `### L-002 <title> → AGENTS.md`. The target file must
+name `L-002`.
+
+Deletion: remove an entry when the code it names no longer exists, when an
+existing gate already blocks the mistake, or when it has not recurred for 60
+days and the binding rules already cover it. List deletions in the pull request
+body; git history keeps the original text.
+
+Privacy: this is a public repository. Do not write local paths, library
+content, personal configuration or credentials; evidence stops at issue
+numbers.
+
+`python scripts/check_lessons.py` enforces the format, numbering, the 16 KiB
+cap and the privacy patterns. CI runs it.
+
 ## Pull requests
 
 Branch off `main`, keep one pull request to one purpose, and link the issue it

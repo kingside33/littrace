@@ -41,6 +41,12 @@ jobs:
         with:
           python-version: "3.13"
 
+      # The lessons book is plain Markdown parsed by a stdlib-only script, so
+      # this check needs no dependencies. It runs once here instead of in the
+      # pytest matrix; tests/test_lessons_format.py anchors the parser itself.
+      - name: Check lessons format
+        run: python scripts/check_lessons.py
+
       # The ruff version has one source of truth: requirements-dev.txt pins it
       # exactly. pyproject.toml carries the matching range for pip users and
       # deliberately does not repeat the exact pin. Read the pin; do not copy
