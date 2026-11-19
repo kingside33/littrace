@@ -65,7 +65,11 @@ def install(app, context, token):
 
     @app.post('/api/settings')
     def save_settings(values: dict):
-        return store.save_settings(values)
+        # Same shape as GET, `cache` included: the settings page shows the
+        # save result from this response, and a save that silently omits the
+        # projection would force a second GET to say what happened (and lose
+        # the confirmation if that second call fails).
+        return dict(store.save_settings(values), cache=store.cache_info())
 
     @app.post('/api/jobs')
     def jobs(data: dict):

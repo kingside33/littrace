@@ -160,6 +160,24 @@ class CacheSettingsApi(unittest.TestCase):
         self.assertEqual(body['cache']['path'], str(self.cache.resolve()))
         self.assertTrue(self.cache.is_dir())
 
+    def test_post_settings_returns_the_same_cache_projection_as_get(self):
+        # The settings page renders the save confirmation from this response
+        # (#67): a POST that omitted  would force a second GET and lose
+        # the confirmation if that call failed.
+        response = self.client.post(
+            '/api/settings', json={'cache_dir': str(self.cache)}, headers=self.headers
+        )
+        self.assertEqual(response.status_code, 200)
+        cache = response.json().get('cache')
+        self.assertIsNotNone(cache, 'POST /api/settings must include the cache projection')
+        self.assertEqual(cache['path'], str(self.cache.resolve()))
+        self.assertTrue(cache['overridden'])
+        self.assertIn('default_path', cache)
+        self.assertIn('files', cache)
+        self.assertIn('bytes', cache)
+        # And it must agree with what a subsequent GET reports.
+        self.assertEqual(cache, self.client.get('/api/settings').json()['cache'])
+
     def test_post_settings_reports_a_bad_path_instead_of_swallowing_it(self):
         response = self.client.post('/api/settings', json={'cache_dir': 'not-absolute'}, headers=self.headers)
         self.assertEqual(response.status_code, 400)
