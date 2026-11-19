@@ -51,3 +51,5 @@
 | [0034](0034-u3-gap-hint-by-cause.md) | [U3] 缺口卡片按成因给提示 | warning 与截断不是「无证据」,共用文案会否定上方的证据 |
 | [0035](0035-u5-client-origin-pure-verdict.md) | [U5] 端口变更以纯函数判定是否重建客户端 | 任何 origin 差异即重建,令牌随旧客户端丢弃 |
 | [0036](0036-u5-last-sync-by-state-not-timestamp.md) | [U5] 上次同步按 export_sync 状态判定 | 三次写入都刷新 updated,只看时间戳会把失败读成成功 |
+| [0039](0039-ci-fast-lane-full-ci-label.md) | [CI] PR 默认快线,重型全量由 full-ci 标签或 merge_group 触发 | 普通 PR 只跑快线,full-ci/队列才跑重型,聚合 gate 判 deferred |
+| [0040](0040-merge-queue-gate-before-queue.md) | [CI] 合并队列按「Gate 先于队列」启用 | 个人账号仓库暂不可用,先落 merge_group 触发与 gate,转组织后再启用 |
