@@ -53,7 +53,15 @@ def install(app, context, token):
 
     @app.get('/api/settings')
     def settings():
-        return dict(store.settings(public=True), connection=store.state('api_connection', {}))
+        # `cache` is what the settings page shows for the (configurable) cache
+        # directory: effective path, default path, whether it is overridden,
+        # and how many files/bytes it holds. Read-only projection; the writable
+        # setting stays `cache_dir` in the flat map.
+        return dict(
+            store.settings(public=True),
+            connection=store.state('api_connection', {}),
+            cache=store.cache_info(),
+        )
 
     @app.post('/api/settings')
     def save_settings(values: dict):

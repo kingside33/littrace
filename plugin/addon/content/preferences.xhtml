@@ -77,6 +77,39 @@
   </groupbox>
 
   <groupbox>
+    <label><html:h2 data-l10n-id="littrace-prefs-group-cache" /></label>
+    <description data-l10n-id="littrace-prefs-group-cache-desc" />
+
+    <hbox align="center">
+      <label
+        control="littrace-prefs-cache-dir"
+        data-l10n-id="littrace-prefs-cache-dir"
+      />
+      <!-- Bound declaratively like the port: Zotero persists the text. The
+           Apply button is what forwards it to the service and validates the
+           path there, because existence and writability belong to the machine
+           running the service, not to Zotero. -->
+      <html:input
+        id="littrace-prefs-cache-dir"
+        type="text"
+        size="48"
+        preference="extensions.zotero.littrace.cache.dir"
+      />
+      <html:button id="littrace-prefs-cache-save" data-l10n-id="littrace-prefs-cache-save" />
+    </hbox>
+    <description data-l10n-id="littrace-prefs-cache-dir-desc" />
+
+    <hbox align="center">
+      <label data-l10n-id="littrace-prefs-cache-current" />
+      <label id="littrace-prefs-cache-current" data-l10n-id="littrace-prefs-cache-checking" />
+    </hbox>
+    <description id="littrace-prefs-cache-default" />
+    <description id="littrace-prefs-cache-result" hidden="true" />
+    <description data-l10n-id="littrace-prefs-cache-reuse" />
+    <description data-l10n-id="littrace-prefs-cache-reuse-desc" />
+  </groupbox>
+
+  <groupbox>
     <label><html:h2 data-l10n-id="littrace-prefs-group-pro" /></label>
     <description data-l10n-id="littrace-prefs-group-pro-desc" />
 
