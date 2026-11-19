@@ -25,7 +25,10 @@ class PathsCacheRoot(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.data = Path(self.temp.name) / '_index'
+        # resolve(): on Windows the temp path can arrive in its 8.3 short form
+        # (RUNNER~1) while Paths resolves the long form (runneradmin), and the
+        # comparison would fail for a reason unrelated to the layout rule.
+        self.data = (Path(self.temp.name) / '_index').resolve()
 
     def test_default_cache_is_under_the_data_dir(self):
         paths = Paths.from_base(self.temp.name, data_dir=str(self.data))
