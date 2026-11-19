@@ -51,3 +51,5 @@
 | [0034](0034-u3-gap-hint-by-cause.md) | [U3] 缺口卡片按成因给提示 | warning 与截断不是「无证据」,共用文案会否定上方的证据 |
 | [0035](0035-u5-client-origin-pure-verdict.md) | [U5] 端口变更以纯函数判定是否重建客户端 | 任何 origin 差异即重建,令牌随旧客户端丢弃 |
 | [0036](0036-u5-last-sync-by-state-not-timestamp.md) | [U5] 上次同步按 export_sync 状态判定 | 三次写入都刷新 updated,只看时间戳会把失败读成成功 |
+| [0037](0037-u6-resolve-paper-id-before-write.md) | [U6] 写路径提交前统一解析 paper_id | 两条写命令共用一个只读解析前置,未入库与服务错误分得开 |
+| [0038](0038-u6-guide-copy-by-service-state.md) | [U6] 引导文案按服务状态分支 | 契约表加键、纯函数选键,「启动」与「更新」不再共用一句错话 |
