@@ -170,6 +170,7 @@ jobs:
             tests/test_plugin_registry.cjs
             tests/test_plugin_sections.cjs
             tests/test_plugin_service_client.cjs
+            tests/test_plugin_settings.cjs
             tests/test_plugin_status.cjs
             tests/test_plugin_tabs.cjs
             tests/test_references.cjs
@@ -225,6 +226,7 @@ jobs:
             tests/test_plugin_registry.cjs \
             tests/test_plugin_sections.cjs \
             tests/test_plugin_service_client.cjs \
+            tests/test_plugin_settings.cjs \
             tests/test_plugin_status.cjs \
             tests/test_plugin_tabs.cjs \
             tests/test_references.cjs \
