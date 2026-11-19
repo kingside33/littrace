@@ -77,10 +77,37 @@ test("the table gives every feature its own pref and keeps Pro as placeholders",
   assert.equal(new Set(keys).size, keys.length, "duplicate pref key");
   assert.deepEqual(core.PREF_GROUPS.map((group) => group.id), [
     "connection",
+    "cloud",
     "integration",
     "cache",
     "pro",
   ]);
+  // A group's `kind` says where its values live, and it must be checkable:
+  // a `server` group has no PREF_ENTRIES rows (its fields are in
+  // settingsCore's SETTINGS_FIELDS), and every `prefs` group has some.
+  for (const group of core.PREF_GROUPS) {
+    assert.ok(
+      group.kind === "prefs" || group.kind === "server",
+      `${group.id} has an unknown kind ${group.kind}`,
+    );
+  }
+  const serverGroups = core.PREF_GROUPS.filter((group) => group.kind === "server");
+  assert.deepEqual(serverGroups.map((group) => group.id), ["cloud"]);
+  for (const group of serverGroups) {
+    assert.equal(
+      core.entriesForGroup(group.id).length,
+      0,
+      `${group.id} is a server group and must not carry Zotero pref rows`,
+    );
+  }
+  for (const group of core.PREF_GROUPS) {
+    if (group.kind === "prefs") {
+      assert.ok(
+        core.entriesForGroup(group.id).length > 0,
+        `${group.id} is a prefs group and needs at least one row`,
+      );
+    }
+  }
 
   const pro = core.entriesForGroup("pro");
   assert.ok(pro.length >= 2, "Pro group carries one pref per planned feature");
@@ -162,6 +189,72 @@ test("the pane binds exactly the visible table rows", async () => {
   assert.match(markup, /data-l10n-id="littrace-prefs-pro-not-running"/);
   // A platform card exists and starts hidden.
   assert.match(markup, /id="littrace-prefs-platform" hidden="true"/);
+});
+
+test("the pane draws the groups in the table's order, and only those", async () => {
+  const core = await loadCore();
+  const markup = read(PANE_XHTML);
+  // The table does not order the pane — the markup does, by the order of its
+  // h2 headings. Without this comparison a group added to PREF_GROUPS but
+  // forgotten in the markup would be invisible to every other test, and one
+  // drawn in the wrong place would only be caught by a human on a real machine.
+  const drawn = [...markup.matchAll(/data-l10n-id="littrace-(prefs-group-[a-z-]+)"/g)]
+    // The description line reuses the same prefix with a `-desc` suffix.
+    .map((match) => match[1])
+    .filter((key) => !key.endsWith("-desc"));
+  assert.deepEqual(drawn, core.PREF_GROUPS.map((group) => group.titleKey));
+  // Every group the table names is also drawn exactly once.
+  assert.equal(new Set(drawn).size, drawn.length, "a group heading is drawn twice");
+});
+
+test("the cloud group is server-side: no pref bindings, its own platform card", async () => {
+  const core = await loadCore();
+  const markup = read(PANE_XHTML);
+  const start = markup.indexOf('id="littrace-prefs-cloud"');
+  assert.ok(start > 0, "the cloud group is missing from the pane");
+  const end = markup.indexOf("</groupbox>", start);
+  const group = markup.slice(start, end > start ? end : markup.length);
+  // A declarative binding here would mean the value lives in Zotero prefs,
+  // which it does not.
+  assert.equal(
+    group.includes("preference="),
+    false,
+    "the cloud group must not carry preference= bindings: its values live in the service's settings.json",
+  );
+  // The controls the wiring looks up by id must all be present.
+  for (const id of [
+    "littrace-prefs-cloud-base",
+    "littrace-prefs-cloud-model",
+    "littrace-prefs-cloud-key",
+    "littrace-prefs-cloud-clear",
+    "littrace-prefs-cloud-proxy",
+    "littrace-prefs-cloud-budget-mode",
+    "littrace-prefs-cloud-daily-budget",
+    "littrace-prefs-cloud-input-price",
+    "littrace-prefs-cloud-output-price",
+    "littrace-prefs-cloud-enabled",
+    "littrace-prefs-cloud-save",
+    "littrace-prefs-cloud-test",
+    "littrace-prefs-cloud-status",
+  ]) {
+    assert.ok(group.includes(`id="${id}"`), `missing control ${id}`);
+  }
+  // The reason card is present and starts hidden; loadCloud reveals it on a
+  // platform where DPAPI cannot protect a key.
+  assert.match(group, /id="littrace-prefs-cloud-platform" hidden="true"/);
+  // The key box must never be a plain text field.
+  assert.match(
+    group,
+    /id="littrace-prefs-cloud-key"[^>]*type="password"[\s\S]{0,80}?|type="password"[\s\S]{0,120}?id="littrace-prefs-cloud-key"/,
+    "the API key input must be type=password",
+  );
+  // The two budget mode option values are exactly the strings
+  // store.save_settings accepts.
+  const settingsCore = await import(
+    pathToFileURL(path.join(PLUGIN_DIR, "src", "settings", "settingsCore.mjs")).href
+  );
+  const options = [...group.matchAll(/<html:option value="([a-z]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(options, [...settingsCore.BUDGET_MODES]);
 });
 
 /**

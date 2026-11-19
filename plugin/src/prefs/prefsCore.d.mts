@@ -17,6 +17,8 @@ export type PrefEntry = {
 
 export type PrefGroup = {
   id: string;
+  /** "prefs" = rows in PREF_ENTRIES; "server" = fields in settingsCore. */
+  kind: "prefs" | "server";
   titleKey: string;
   descriptionKey: string;
 };

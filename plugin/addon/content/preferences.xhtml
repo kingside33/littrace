@@ -54,6 +54,147 @@
     <description data-l10n-id="littrace-prefs-diagnostics-hint" />
   </groupbox>
 
+  <!-- 云端 AI（服务侧设置，不是 Zotero pref）。
+       这里的所有控件都不带 preference= 属性：值存在服务端的 settings.json，
+       由 src/settings/settingsPane.ts 经 POST /api/settings 读写。密钥只以
+       「已保存 / 未保存」出现，永远不回显。 -->
+  <groupbox id="littrace-prefs-cloud">
+    <label><html:h2 data-l10n-id="littrace-prefs-group-cloud" /></label>
+    <description data-l10n-id="littrace-prefs-group-cloud-desc" />
+
+    <!-- 非 Windows 上 DPAPI 不可用，保存密钥必定失败；这张卡由
+         settingsPane.loadCloud() 决定显隐，控件同时置灰。 -->
+    <vbox id="littrace-prefs-cloud-platform" hidden="true">
+      <description data-l10n-id="littrace-prefs-platform-cloud-unsupported" />
+      <description data-l10n-id="littrace-prefs-platform-cloud-unsupported-desc" />
+    </vbox>
+
+    <hbox align="center">
+      <label
+        control="littrace-prefs-cloud-base"
+        data-l10n-id="littrace-prefs-cloud-base"
+      />
+      <html:input id="littrace-prefs-cloud-base" type="text" size="42" />
+    </hbox>
+    <description data-l10n-id="littrace-prefs-cloud-base-desc" />
+
+    <hbox align="center">
+      <label
+        control="littrace-prefs-cloud-model"
+        data-l10n-id="littrace-prefs-cloud-model"
+      />
+      <html:input id="littrace-prefs-cloud-model" type="text" size="24" />
+    </hbox>
+    <description data-l10n-id="littrace-prefs-cloud-model-desc" />
+
+    <hbox align="center">
+      <label
+        control="littrace-prefs-cloud-key"
+        data-l10n-id="littrace-prefs-cloud-key"
+      />
+      <html:input
+        id="littrace-prefs-cloud-key"
+        type="password"
+        size="32"
+        autocomplete="new-password"
+      />
+      <html:button
+        id="littrace-prefs-cloud-clear"
+        data-l10n-id="littrace-prefs-cloud-clear"
+      />
+    </hbox>
+    <description data-l10n-id="littrace-prefs-cloud-key-desc" />
+    <description
+      id="littrace-prefs-cloud-clear-hint"
+      data-l10n-id="littrace-prefs-cloud-clear-hint"
+      hidden="true"
+    />
+
+    <hbox align="center">
+      <label
+        control="littrace-prefs-cloud-proxy"
+        data-l10n-id="littrace-prefs-cloud-proxy"
+      />
+      <html:input id="littrace-prefs-cloud-proxy" type="text" size="32" />
+    </hbox>
+    <description data-l10n-id="littrace-prefs-cloud-proxy-desc" />
+
+    <hbox align="center">
+      <label
+        control="littrace-prefs-cloud-budget-mode"
+        data-l10n-id="littrace-prefs-cloud-budget-mode"
+      />
+      <!-- html:select matches how the rest of this pane uses plain HTML
+           controls; the option values are the two strings
+           store.save_settings accepts (settingsCore.BUDGET_MODES). -->
+      <html:select id="littrace-prefs-cloud-budget-mode">
+        <html:option value="limited" data-l10n-id="littrace-prefs-cloud-budget-limited" />
+        <html:option value="unlimited" data-l10n-id="littrace-prefs-cloud-budget-unlimited" />
+      </html:select>
+    </hbox>
+    <description data-l10n-id="littrace-prefs-cloud-budget-mode-desc" />
+
+    <hbox align="center">
+      <label
+        control="littrace-prefs-cloud-daily-budget"
+        data-l10n-id="littrace-prefs-cloud-daily-budget"
+      />
+      <html:input
+        id="littrace-prefs-cloud-daily-budget"
+        type="number"
+        min="0"
+        step="any"
+        size="8"
+      />
+    </hbox>
+    <description data-l10n-id="littrace-prefs-cloud-daily-budget-desc" />
+
+    <hbox align="center">
+      <label
+        control="littrace-prefs-cloud-input-price"
+        data-l10n-id="littrace-prefs-cloud-input-price"
+      />
+      <html:input
+        id="littrace-prefs-cloud-input-price"
+        type="number"
+        min="0"
+        step="any"
+        size="8"
+      />
+      <label
+        control="littrace-prefs-cloud-output-price"
+        data-l10n-id="littrace-prefs-cloud-output-price"
+      />
+      <html:input
+        id="littrace-prefs-cloud-output-price"
+        type="number"
+        min="0"
+        step="any"
+        size="8"
+      />
+    </hbox>
+    <description data-l10n-id="littrace-prefs-cloud-input-price-desc" />
+    <description data-l10n-id="littrace-prefs-cloud-output-price-desc" />
+
+    <checkbox
+      id="littrace-prefs-cloud-enabled"
+      data-l10n-id="littrace-prefs-cloud-enabled"
+    />
+    <description data-l10n-id="littrace-prefs-cloud-enabled-desc" />
+
+    <hbox align="center">
+      <html:button
+        id="littrace-prefs-cloud-save"
+        data-l10n-id="littrace-prefs-cloud-save"
+      />
+      <html:button
+        id="littrace-prefs-cloud-test"
+        data-l10n-id="littrace-prefs-cloud-test"
+      />
+      <label id="littrace-prefs-cloud-status" data-l10n-id="littrace-prefs-cloud-loading" />
+    </hbox>
+  </groupbox>
+
   <groupbox>
     <label><html:h2 data-l10n-id="littrace-prefs-group-integration" /></label>
     <description data-l10n-id="littrace-prefs-group-integration-desc" />

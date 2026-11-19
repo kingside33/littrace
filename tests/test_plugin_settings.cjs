@@ -390,6 +390,120 @@ test("no visible string escapes the registry in the TypeScript edge", () => {
   assert.ok(entry.length > 0);
 });
 
+test("the probe runs only from a click, never on pane load", () => {
+  const source = read(SETTINGS_PANE_TS);
+  // SECURITY.md: a request that happens without a user action or a setting is
+  // a bug. The probe is the one call here that reaches a metered third-party
+  // endpoint, so it must sit behind the test button's listener.
+  const probeCalls = [...source.matchAll(/serviceClient\(\)\.post\(\s*"([^"]+)"/g)].map(
+    (match) => match[1],
+  );
+  assert.ok(probeCalls.includes("/api/settings/test"), "the probe endpoint is used");
+  assert.equal(
+    probeCalls.filter((path) => path === "/api/settings/test").length,
+    1,
+    "the probe must have exactly one call site",
+  );
+  // ...and it must live in testCloud, not in the load path: opening the pane
+  // is not a user request to spend anything on a third-party endpoint.
+  const testCloud = source.slice(source.indexOf("export async function testCloud"));
+  const testCloudBody = testCloud.slice(0, testCloud.indexOf("\nexport ", 1));
+  assert.match(testCloudBody, /\/api\/settings\/test/, "the probe belongs to testCloud");
+  const loadCloud = source.slice(source.indexOf("export async function loadCloud"));
+  const loadCloudBody = loadCloud.slice(0, loadCloud.indexOf("\nexport ", 1));
+  assert.doesNotMatch(
+    loadCloudBody,
+    /\/api\/settings\/test/,
+    "loadCloud must not probe",
+  );
+  // The load path issues exactly one read, and never a write.
+  assert.match(loadCloudBody, /serviceClient\(\)\.get\("\/api\/settings"\)/);
+  assert.doesNotMatch(loadCloudBody, /serviceClient\(\)\.post\(/);
+});
+
+test("the cloud group writes through the shared client, never its own request", () => {
+  const source = read(SETTINGS_PANE_TS);
+  // The pane must not open a second HTTP path: the S4 client owns the token,
+  // the `errorDelayMax: 0` discipline and the failure classification.
+  assert.doesNotMatch(source, /Zotero\.HTTP\.request/);
+  assert.doesNotMatch(source, /\bXMLHttpRequest\b/);
+  assert.doesNotMatch(source, /\bfetch\(/);
+  assert.match(source, /import \{ serviceClient \} from "\.\.\/service-client"/);
+  // Every write goes through settingsCore's payload builders rather than a
+  // hand-built object, so the "never null" rule cannot be bypassed here.
+  assert.match(source, /savePayloadFrom\(readForm\(doc\)\)/);
+  assert.match(source, /clearKeyPayload\(\)/);
+});
+
+test("only the key write is gated off Windows, not the whole group", () => {
+  const source = read(SETTINGS_PANE_TS);
+  // kbapp/core/secrets.py returns early for an empty value and only reaches
+  // its `os.name != 'nt'` guard for a NON-EMPTY key. So reading the settings,
+  // saving the address/model/prices and probing a keyless endpoint all work
+  // off Windows; only storing a key does not. Greying the whole group would
+  // claim otherwise, and the user could not act on it.
+  const saveCloud = source.slice(source.indexOf("export async function saveCloud"));
+  const saveBody = saveCloud.slice(0, saveCloud.indexOf("\nexport ", 1));
+  // The refusal is on the payload, not on the platform alone.
+  assert.match(saveBody, /payload\.api_key/, "the gate must inspect the key being saved");
+  assert.match(
+    saveBody,
+    /!canProtectKey\(\)[\s\S]{0,120}?payload\.api_key\.length > 0/,
+    "an empty key saves fine anywhere; a non-empty one is refused with a readable line",
+  );
+  // A refusal must be visible, not silent.
+  assert.match(saveBody, /setStatus\(doc, "saveFailed"/);
+
+  // Probing sends no secret of its own, so it is not gated at all.
+  const testCloud = source.slice(source.indexOf("export async function testCloud"));
+  const testBody = testCloud.slice(0, testCloud.indexOf("\nexport ", 1));
+  assert.doesNotMatch(
+    testBody,
+    /canProtectKey|platformSupportsCloud/,
+    "the probe reads saved configuration and must stay available",
+  );
+
+  // The load path always reads, and paints the reason card.
+  const loadCloud = source.slice(source.indexOf("export async function loadCloud"));
+  const loadBody = loadCloud.slice(0, loadCloud.indexOf("\nexport ", 1));
+  assert.match(loadBody, /applyKeyGate\(doc\)/);
+  assert.doesNotMatch(
+    loadBody,
+    /return;\s*\n\s*\}\s*\n\s*setStatus/,
+    "loadCloud must not bail out before reading on an unsupported platform",
+  );
+  assert.match(loadBody, /serviceClient\(\)\.get\("\/api\/settings"\)/);
+});
+
+test("the key gate disables exactly the two controls that write a secret", () => {
+  const source = read(SETTINGS_PANE_TS);
+  const gate = source.slice(source.indexOf("function applyKeyGate"));
+  const body = gate.slice(0, gate.indexOf("\n/**", 1));
+  // The key box and the clear button; nothing else.
+  assert.match(body, /\[IDS\.key, IDS\.clear\]/);
+  assert.match(body, /card\.hidden = false/);
+  // Writing a secret is what cannot work, so the reason card appears next to
+  // those two controls rather than over the whole group.
+  assert.doesNotMatch(
+    body,
+    /querySelectorAll\("input, button, select"\)/,
+    "greying every control would claim the free fields are unavailable too",
+  );
+});
+
+test("re-entering the pane re-reads instead of showing stale values", () => {
+  const source = read(SETTINGS_PANE_TS);
+  // `preferences.js` guards pane loading with a `loaded` flag, so onPaneLoad
+  // may run once per preferences window; without a re-entry refresh a user who
+  // changed the port or the key elsewhere would see the old values.
+  assert.match(source, /addEventListener\("showing"/);
+  const mount = source.slice(source.indexOf("export function mountCloud"));
+  const mountBody = mount.slice(0, mount.indexOf("\n}\n"));
+  assert.match(mountBody, /addEventListener\("showing"[\s\S]{0,120}?loadCloud\(doc\)/);
+  // And the listener must not be the only read: the first open still loads.
+  assert.match(mountBody, /void loadCloud\(doc\)/);
+});
+
 test("the probe budget is strictly below the plugin's request timeout", async () => {
   // The plugin's only request path carries REQUEST_DISCIPLINE.timeout (ADR
   // 0018). A service probe that runs as long would make the client answer
