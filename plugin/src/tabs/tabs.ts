@@ -7,12 +7,15 @@ import {
   DEFAULT_OPEN_MECHANISM,
   bridgePlan,
   createCleanupLedger,
+  hasResultContainer,
   isDeepLink,
   locateRefusalOf,
   locateRequestOf,
+  readTabId,
   resolveOpenPlan,
   reuseVerdict,
   tabById,
+  tabDataPayload,
   tabNodeSpec,
 } from "./tabsCore.mjs";
 import type {
@@ -62,12 +65,25 @@ const OPEN_MECHANISM = DEFAULT_OPEN_MECHANISM;
 /** THE switch point for the deep-link bridge. */
 const BRIDGE_MODE = DEFAULT_BRIDGE_MODE;
 
-/** Shape of the internal Zotero_Tabs API this file touches (真机定案). */
+/**
+ * Shape of the internal Zotero_Tabs API this file touches (真机定案, Zotero 10.0.8).
+ *
+ * `add()` returns `{ id, container }`, NOT a bare id string: the container is
+ * a XUL `<tab-content>` element that Zotero has already appended to its deck.
+ * The `data` option is stored verbatim on the tab record; omitting it leaves
+ * `tab.data === undefined`, which Zotero's own tab renderer dereferences
+ * (e.g. `tab.data.icon` on reader tabs) and which therefore must be supplied.
+ */
+interface ZoteroTabAddResult {
+  id?: unknown;
+  container?: unknown;
+}
+
 interface ZoteroTabsAPI {
   add(options: Record<string, unknown>): unknown;
   close?(tabID: string): unknown;
   select?(tabID: string): unknown;
-  _tabs?: Array<{ id?: string; container?: unknown }>;
+  _tabs?: Array<{ id?: string; container?: unknown; data?: unknown }>;
 }
 
 /** One tab this host opened, and what it takes to host or release it. */
@@ -415,19 +431,24 @@ function mountInZoteroTab(
   }
   let result: unknown;
   try {
-    // 待真机定案: 选项名、返回值与容器取法都是非公开机制。
+    // 已真机定案 (Zotero 10.0.8): `data` 会被原样存进 tab 记录,缺省会留下
+    // `tab.data === undefined`,Zotero 自己的 tab 渲染会去读它;这里给一个空对象
+    // 作为占位,让 tab 记录的形状始终成立。
     result = tabs.add({
       type: `${config.addonRef}-${entry.id}`,
       title: t(entry.titleKey),
       select: true,
+      data: tabDataPayload(),
       onClose: onHostClose,
     });
   } catch (error) {
     report(error, "Zotero_Tabs.add");
     return null;
   }
-  const tabID = typeof result === "string" && result.length > 0 ? result : null;
-  const container = tabID ? findTabContainer(window, tabs, tabID) : null;
+  // 已真机定案: 返回 `{ id, container }` 而不是 id 字符串。两种形态都接受,
+  // 但对象形态是 Zotero 10 的真实契约。
+  const tabID = readTabID(result);
+  const container = readTabContainer(result) ?? (tabID ? findTabContainer(window, tabs, tabID) : null);
   if (!tabID || !container) {
     if (tabID) {
       closeZoteroTab(tabs, tabID);
@@ -476,6 +497,22 @@ function mountInZoteroTab(
  * the fallback for the same internal mechanism. Returning null makes the
  * caller switch to the dialog instead of throwing.
  */
+/**
+ * The tab id from whatever `Zotero_Tabs.add` returned. The parsing lives in
+ * the tested pure module (`tabsCore.mjs`), so the shape is asserted once.
+ */
+function readTabID(result: unknown): string | null {
+  return readTabId(result);
+}
+
+/** The deck container `Zotero_Tabs.add` already appended, when it handed one back. */
+function readTabContainer(result: unknown): HTMLElement | null {
+  if (!hasResultContainer(result)) {
+    return null;
+  }
+  return (result as ZoteroTabAddResult).container as HTMLElement;
+}
+
 function findTabContainer(
   window: Window,
   tabs: ZoteroTabsAPI,
@@ -609,13 +646,22 @@ function mountInDialog(
   };
 }
 
-/** The iframe itself. The service page owns everything inside the frame. */
+/**
+ * The iframe itself. The service page owns everything inside the frame.
+ *
+ * `type="content"` matters in the XUL fallback window: `openDialog("about:blank")`
+ * yields a XUL document, where a plain `<iframe>` cannot host a remote http
+ * page and renders an empty frame. In an HTML (XUL-tab content) document the
+ * attribute is inert, so it is set unconditionally rather than branched on.
+ */
 function createIframe(
   owner: Window,
   entry: TabEntry,
   spec: TabNodeSpec,
 ): HTMLIFrameElement {
-  const iframe = owner.document.createElement("iframe");
+  const doc = owner.document;
+  const iframe = doc.createElement("iframe");
+  iframe.setAttribute("type", "content");
   iframe.src = spec.src;
   iframe.title = t(entry.titleKey);
   iframe.dataset.littraceTab = entry.id;

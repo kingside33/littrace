@@ -478,3 +478,89 @@ test("a closed host is detected and removed instead of being reused", () => {
   assert.equal(signalCount, 2, "both mount paths must provide signals()");
   assert.match(source, /iframeConnected: iframe\.isConnected/);
 });
+
+// ── Zotero_Tabs.add result contract (真机定案, Zotero 10.0.8) ──────────────
+//
+// The real `chrome/content/zotero/tabs.js` returns `{ id, container }` and
+// stores `data` verbatim on the tab record; omitting `data` leaves
+// `tab.data === undefined` and Zotero's own renderer dereferences it. Both
+// halves of that contract are parsed by the pure module, so they are asserted
+// here instead of only on a real machine.
+
+test("readTabId accepts the documented object shape and the legacy string", async () => {
+  const { readTabId } = await loadCore();
+
+  assert.equal(readTabId({ id: "tab-abc", container: {} }), "tab-abc");
+  assert.equal(readTabId("tab-legacy"), "tab-legacy");
+
+  // Everything else is "no usable id", never a throw: the caller falls back.
+  assert.equal(readTabId(null), null);
+  assert.equal(readTabId(undefined), null);
+  assert.equal(readTabId(""), null);
+  assert.equal(readTabId({}), null);
+  assert.equal(readTabId({ id: "" }), null);
+  assert.equal(readTabId({ id: 42 }), null);
+  assert.equal(readTabId(7), null);
+  assert.equal(readTabId([{ id: "x" }]), null);
+});
+
+test("hasResultContainer only accepts a node that can take children", async () => {
+  const { hasResultContainer } = await loadCore();
+  const appendable = { append() {} };
+
+  assert.equal(hasResultContainer({ id: "t", container: appendable }), true);
+  assert.equal(hasResultContainer({ id: "t" }), false);
+  assert.equal(hasResultContainer({ container: null }), false);
+  assert.equal(hasResultContainer({ container: "div" }), false);
+  assert.equal(hasResultContainer({ container: {} }), false);
+  assert.equal(hasResultContainer("tab-id"), false);
+  assert.equal(hasResultContainer(null), false);
+});
+
+test("tabDataPayload always yields a plain object, copying caller fields", async () => {
+  const { tabDataPayload } = await loadCore();
+
+  // The record must never carry `undefined`, which is the whole defect.
+  const empty = tabDataPayload();
+  assert.deepEqual(empty, {});
+  assert.equal(typeof empty, "object");
+  assert.notEqual(empty, null);
+  assert.equal(Array.isArray(empty), false);
+  assert.equal(Object.getPrototypeOf(empty), Object.prototype);
+
+  const withFields = tabDataPayload({ paper: "z:1:ABC", itemID: 7 });
+  assert.deepEqual(withFields, { paper: "z:1:ABC", itemID: 7 });
+
+  // Nullish and non-object inputs degrade to the empty payload rather than throw.
+  assert.deepEqual(tabDataPayload(null), {});
+  assert.deepEqual(tabDataPayload(["a"]), {});
+  assert.deepEqual(tabDataPayload("x"), {});
+
+  // A fresh object each call: one tab's payload must not leak into another.
+  assert.notEqual(tabDataPayload(), tabDataPayload());
+});
+
+test("the primary path passes data and reads the object-shaped result", async () => {
+  const source = fs.readFileSync(TABS_TS, "utf8");
+
+  // `data` must be in the options: the tab record has to carry an object.
+  assert.match(
+    source,
+    /tabs\.add\(\{[\s\S]*?data: tabDataPayload\(\)[\s\S]*?\}\)/,
+    "Zotero_Tabs.add must be given a data payload",
+  );
+  // The result is parsed by the shared helpers, not by a bare typeof check.
+  assert.match(source, /const tabID = readTabID\(result\);/, "id must come from the shared parser");
+  assert.match(
+    source,
+    /readTabContainer\(result\)/,
+    "the container must be taken from the result when Zotero supplies one",
+  );
+
+  // The XUL fallback window needs type="content" or a remote page stays blank.
+  assert.match(
+    source,
+    /iframe\.setAttribute\("type", "content"\)/,
+    "the fallback window's iframe must be a content iframe",
+  );
+});
