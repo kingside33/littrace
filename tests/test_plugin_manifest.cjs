@@ -1,7 +1,7 @@
 "use strict";
 
 // Anchors the plugin manifest contract (A1 插件骨架与构建链):
-// - pluginID stays in the placeholder shape until A0 names the plugin;
+// - pluginID is the A0-decided id (name@domain, no "Zotero", ADR on naming);
 // - supported Zotero range is strict_min_version 8.0 with an x.x.* max;
 // - the manifest version exists and matches plugin/package.json;
 // - bootstrap.js keeps the full lifecycle so window-level registrations can
@@ -21,11 +21,14 @@ function readJson(relativePath) {
   return JSON.parse(fs.readFileSync(path.join(PLUGIN_DIR, relativePath), "utf8"));
 }
 
-test("manifest keeps the plugin id in the placeholder shape", () => {
+test("manifest carries the A0-decided plugin id", () => {
   const manifest = readJson("addon/manifest.json");
   const id = manifest.applications.zotero.id;
-  // Placeholder form per the A1 contract; A0 replaces it with the real id.
-  assert.match(id, /^[^@\s]+@example\.invalid$/);
+  // A0 (2026-11-19): name@domain, settled before any public beta. The
+  // placeholder form that A1 shipped with must be gone — a Zotero install
+  // that saw the placeholder would treat the renamed plugin as a second one.
+  assert.equal(id, "littrace@kingside33.github.io");
+  assert.match(id, /^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$/);
 });
 
 test("manifest pins the supported Zotero range", () => {
@@ -42,10 +45,16 @@ test("manifest declares a version equal to package.json", () => {
   assert.equal(manifest.version, pkg.version);
 });
 
-test("manifest and package.json agree on the placeholder addon id", () => {
+test("manifest and package.json agree on the A0 addon id", () => {
   const manifest = readJson("addon/manifest.json");
   const pkg = readJson("package.json");
   assert.equal(manifest.applications.zotero.id, pkg.config.addonID);
+  // A0 (maintainer decision): the id is the settled form, not a placeholder.
+  assert.equal(pkg.config.addonID, "littrace@kingside33.github.io");
+  assert.doesNotMatch(pkg.config.addonID, /example\.invalid/);
+  // Trademark rule: neither the display name nor the id may carry the word.
+  assert.doesNotMatch(pkg.config.addonID, /zotero/i);
+  assert.doesNotMatch(pkg.config.addonName, /zotero/i);
 });
 
 test("bootstrap.js keeps the full minimal lifecycle", () => {
