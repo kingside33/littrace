@@ -226,8 +226,128 @@ class ProbeModels(unittest.TestCase):
             handle.read.return_value = body
             handle.status = 200
             probe_models(self.store)
-        self.assertEqual(factory.return_value.open.call_args.kwargs['timeout'], PROBE_TIMEOUT_S)
+        # 传下去的是**剩余**预算而非常量原值：整个请求共用一个 deadline，否则
+        # 代理腿失败后回退腿再拿一份，最坏 2×5s 正好撞上客户端 10s 超时。
+        budget = factory.return_value.open.call_args.kwargs['timeout']
+        self.assertGreater(budget, 0)
+        self.assertLessEqual(budget, PROBE_TIMEOUT_S)
         self.assertLess(PROBE_TIMEOUT_S * 1000, 10000)
+
+    def test_the_probe_shares_one_deadline_across_both_legs(self):
+        # 代理腿失败后回退系统网络时，回退腿拿到的是**剩余**预算：总耗时因此
+        # 不超过 PROBE_TIMEOUT_S。每条腿各给一份会得到 2×5s=10s，与客户端超时
+        # 相等，用户看到的仍是「无法连接本地服务」。
+        self.configure(cloud_proxy='http://127.0.0.1:7897')
+        with patch('kbapp.integrations.cloud.build_opener') as factory:
+            # First opener (proxy leg) refuses; the fallback opener answers.
+            factory.return_value.open.side_effect = [
+                URLError(ConnectionRefusedError('no proxy')),
+                self._ok_handle(b'{}'),
+            ]
+            probe_models(self.store)
+        self.assertEqual(factory.call_count, 2, 'proxy leg, then the fallback leg')
+        fallback_budget = factory.return_value.open.call_args_list[-1].kwargs['timeout']
+        self.assertGreater(fallback_budget, 0)
+        self.assertLessEqual(fallback_budget, PROBE_TIMEOUT_S)
+
+    @staticmethod
+    def _ok_handle(body):
+        import io
+
+        class _Response(io.BytesIO):
+            status = 200
+
+        class _Ctx:
+            def __enter__(self):
+                return _Response(body)
+
+            def __exit__(self, *exc):
+                return False
+
+        return _Ctx()
+
+    def test_guard_rejects_a_cross_origin_redirect_and_allows_the_same_origin(self):
+        # 守卫本身必须有锚：删掉 SameHostRedirectHandler 后，映射表用例仍然全绿，
+        # 于是这道安全修复可以在无人察觉的情况下消失。
+        from urllib.request import Request
+
+        from kbapp.integrations.cloud import SameHostRedirectHandler
+
+        guard = SameHostRedirectHandler()
+
+        def followed(origin, target):
+            request = Request(origin)
+            return guard.redirect_request(request, None, 302, 'Found', {}, target) is not None
+
+        # Same origin, including spellings that are still one origin.
+        self.assertTrue(followed('https://api.example.org/v1/models', 'https://api.example.org/x'))
+        self.assertTrue(followed('https://API.example.org/v1', 'https://api.example.org/x'))
+        self.assertTrue(followed('https://api.example.org/v1', 'https://api.example.org:443/x'))
+        self.assertTrue(followed('http://127.0.0.1:8765/a', 'http://127.0.0.1:8765/b'))
+        # A different host, scheme or port must not receive the bearer key.
+        self.assertFalse(followed('https://api.example.org/v1', 'https://attacker.invalid/x'))
+        self.assertFalse(followed('https://api.example.org/v1', 'http://api.example.org/x'))
+        self.assertFalse(followed('https://api.example.org/v1', 'https://api.example.org:8443/x'))
+        self.assertFalse(followed('https://api.example.org/v1', 'https://sub.api.example.org/x'))
+
+    def test_the_guard_applies_the_budget_to_the_socket_it_connects(self):
+        # 旧实现无条件 `sock.settimeout(150)`，会覆盖 `opener.open(timeout=5)`
+        # 设的预算——于是「配了本地代理但代理半死」这一最常见的故障会让探测挂
+        # 150 秒，PROBE_TIMEOUT_S 形同虚设。这里驱动真实的 connect()：把父类
+        # 的建连替换成「只装一个假 socket」，其余逻辑全部走生产代码。
+        import http.client as http_client
+
+        from kbapp.integrations.cloud import ProxyHTTPConnection
+
+        class _FakeSocket:
+            def __init__(self):
+                self.timeout = 'unset'
+
+            def settimeout(self, value):
+                self.timeout = value
+
+        def fake_connect(self):
+            self.sock = _FakeSocket()
+
+        def budgeted():
+            return ProxyHTTPConnection('example.org', attempt={'sent': False, 'read_timeout': PROBE_TIMEOUT_S})
+
+        def legacy():
+            return ProxyHTTPConnection('example.org', attempt={'sent': False})
+
+        with patch.object(http_client.HTTPConnection, 'connect', fake_connect):
+            probed = budgeted()
+            probed.connect()
+            self.assertEqual(probed.sock.timeout, PROBE_TIMEOUT_S)
+            # The historical default stays 150 when no budget was given, so the
+            # existing complete() path is unchanged.
+            untouched = legacy()
+            untouched.connect()
+            self.assertEqual(untouched.sock.timeout, 150)
+
+    def test_the_probe_path_installs_the_guard_and_the_budget(self):
+        from kbapp.integrations.cloud import ProxyHTTPHandler, SameHostRedirectHandler
+
+        self.configure(cloud_proxy='http://127.0.0.1:7897')
+        body = json.dumps({'data': []}).encode()
+        with patch('kbapp.integrations.cloud.build_opener') as factory:
+            handle = factory.return_value.open.return_value.__enter__.return_value
+            handle.read.return_value = body
+            handle.status = 200
+            probe_models(self.store)
+        handlers = factory.call_args.args
+        self.assertTrue(
+            any(isinstance(h, SameHostRedirectHandler) for h in handlers),
+            'the probe must install SameHostRedirectHandler',
+        )
+        # The guard's historical 150 s socket default must be replaced by the
+        # probe budget, or a half-dead proxy hangs for two and a half minutes.
+        proxies = [h for h in handlers if isinstance(h, ProxyHTTPHandler)]
+        self.assertTrue(proxies, 'a proxy config must build the proxy handlers')
+        for handler in proxies:
+            budget = handler.attempt.get('read_timeout')
+            self.assertIsNotNone(budget)
+            self.assertLessEqual(budget, PROBE_TIMEOUT_S)
 
     def test_probe_never_echoes_the_body_or_the_key(self):
         self.configure()
