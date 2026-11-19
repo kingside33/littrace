@@ -214,6 +214,9 @@ Python 版本、平台、Zotero 版本和本地模型组合的状态只在 [`doc
 
 这张表刻意不写日期：一旦写日期，方向就变成了承诺。
 
+插件的里程碑、依赖、验收标准与边界汇总在
+[docs/zotero-plugin-roadmap.md](docs/zotero-plugin-roadmap.md)。该文档只覆盖开源免费范围。
+
 ## 商业模式
 
 littrace 是本地优先的文献工具。核心以 AGPL-3.0-only 开源，可选的商业层用于支持它的维护。

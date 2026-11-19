@@ -214,6 +214,10 @@ When a Zotero plugin ships, it will get its own plugin × Zotero version matrix.
 
 The table has no dates on purpose. A date would turn a direction into a promise.
 
+The plugin's milestones, dependencies, acceptance criteria and boundaries are
+summarized in [docs/zotero-plugin-roadmap.md](docs/zotero-plugin-roadmap.md).
+That document covers the open, free scope only.
+
 ## Business model
 
 littrace is a local-first literature toolkit. The core is open source under AGPL-3.0-only; an optional commercial layer funds its maintenance.
