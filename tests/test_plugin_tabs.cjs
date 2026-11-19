@@ -557,10 +557,39 @@ test("the primary path passes data and reads the object-shaped result", async ()
     "the container must be taken from the result when Zotero supplies one",
   );
 
-  // The XUL fallback window needs type="content" or a remote page stays blank.
+  // A XUL host document cannot host remote content in an HTML iframe: the
+  // node must be a XUL iframe with type="content", or the page stays blank.
   assert.match(
     source,
-    /iframe\.setAttribute\("type", "content"\)/,
-    "the fallback window's iframe must be a content iframe",
+    /node\.setAttribute\("type", "content"\)/,
+    "the iframe must be a content iframe",
+  );
+  assert.match(
+    source,
+    /createXULElement\("browser"\)/,
+    "a XUL document must create a XUL browser, not an iframe",
+  );
+  // Zotero's own content browser sets these; without them FX128+ stays blank
+  // and never even attempts the navigation (真机 evidence on Zotero 10.0.8).
+  assert.match(
+    source,
+    /setAttribute\("remote", "false"\)/,
+    'the XUL browser needs remote="false"',
+  );
+  assert.match(
+    source,
+    /setAttribute\("maychangeremoteness", "true"\)/,
+    "the XUL browser needs maychangeremoteness",
+  );
+  // XUL parents predate `append`; appendChild inserts into both worlds.
+  assert.match(
+    source,
+    /container\.appendChild\(iframe\)/,
+    "the mount must use appendChild, not append",
+  );
+  assert.match(
+    source,
+    /there\.is\.only\.xul/,
+    "the XUL branch must be keyed on the document namespace, not a guess",
   );
 });

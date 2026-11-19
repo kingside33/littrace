@@ -88,7 +88,7 @@ interface ZoteroTabsAPI {
 
 /** One tab this host opened, and what it takes to host or release it. */
 interface OpenedTab {
-  iframe: HTMLIFrameElement;
+  iframe: TabContentNode;
   /** Bring the hosting tab or window to the front; best effort. */
   focusHost: () => void;
   /** Release the hosting tab or window; must not call back into this host. */
@@ -458,7 +458,9 @@ function mountInZoteroTab(
   }
   try {
     const iframe = createIframe(window, entry, spec);
-    container.append(iframe);
+    // XUL `<tab-content>` predates `ParentNode.append`; `appendChild` is the
+    // one call that inserts into both XUL and HTML parents.
+    container.appendChild(iframe);
     // The deck's own close notification is not a public API, so `hostClosed`
     // is only a signal: `isConnected` (checked below) is the one that holds
     // even when the option name is ignored by the real build.
@@ -647,29 +649,63 @@ function mountInDialog(
 }
 
 /**
- * The iframe itself. The service page owns everything inside the frame.
+ * The content host for a function tab.
  *
- * `type="content"` matters in the XUL fallback window: `openDialog("about:blank")`
- * yields a XUL document, where a plain `<iframe>` cannot host a remote http
- * page and renders an empty frame. In an HTML (XUL-tab content) document the
- * attribute is inert, so it is set unconditionally rather than branched on.
+ * Where the node is created decides whether remote content can load at all:
+ *
+ * - A **XUL** document (Zotero's tab deck `<tab-content>`, and the fallback
+ *   window's `openDialog("about:blank")`) needs a XUL `<browser type="content">`.
+ *   An `<iframe>` — HTML or XUL — does not become a remote-content container
+ *   there, which is why the frame rendered empty in 真机 acceptance.
+ * - An **HTML** document takes a plain `<iframe>`.
+ *
+ * Both expose `src`, `contentDocument`/`contentWindow` and `addEventListener`,
+ * so the rest of this file treats them uniformly through `TabContentNode`.
  */
+interface TabContentNode extends HTMLElement {
+  src: string;
+  contentDocument: Document | null;
+  contentWindow: Window | null;
+}
+
+const XUL_NS =
+  "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
+
 function createIframe(
   owner: Window,
   entry: TabEntry,
   spec: TabNodeSpec,
-): HTMLIFrameElement {
-  const doc = owner.document;
-  const iframe = doc.createElement("iframe");
-  iframe.setAttribute("type", "content");
-  iframe.src = spec.src;
-  iframe.title = t(entry.titleKey);
-  iframe.dataset.littraceTab = entry.id;
-  iframe.style.border = "0";
-  iframe.style.width = "100%";
-  iframe.style.height = "100%";
-  iframe.style.display = "block";
-  return iframe;
+): TabContentNode {
+  const doc = owner.document as Document & {
+    createXULElement?: (name: string) => Element;
+  };
+  const isXUL = doc.documentElement?.namespaceURI === XUL_NS;
+  const node = (
+    isXUL && typeof doc.createXULElement === "function"
+      ? doc.createXULElement("browser")
+      : doc.createElement("iframe")
+  ) as unknown as TabContentNode;
+  if (isXUL) {
+    // The XUL remote-content container, configured exactly as Zotero does for
+    // its own content browser (chrome/content/zotero/elements/abstractBox.js):
+    // `type="content"` makes it a remote-content host; `remote="false"` +
+    // `maychangeremoteness="true"` are what FX128+ requires, otherwise the
+    // element stays blank with no navigation attempt at all (真机 acceptance
+    // on Zotero 10.0.8: zero requests reached the service without them).
+    node.setAttribute("type", "content");
+    node.setAttribute("remote", "false");
+    node.setAttribute("maychangeremoteness", "true");
+    node.setAttribute("disablehistory", "true");
+    node.setAttribute("flex", "1");
+  }
+  node.src = spec.src;
+  node.title = t(entry.titleKey);
+  node.dataset.littraceTab = entry.id;
+  node.style.border = "0";
+  node.style.width = "100%";
+  node.style.height = "100%";
+  node.style.display = "block";
+  return node;
 }
 
 /**
