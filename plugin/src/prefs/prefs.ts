@@ -11,6 +11,7 @@ import { serviceBaseUrlFromPrefs } from "./serviceOrigin";
 import { serviceClient } from "../service-client";
 import { probeHealth } from "../status/diagnostics";
 import { dotView } from "../status/statusCore.mjs";
+import { mountCloud } from "../settings/settingsPane";
 
 /**
  * The settings page (U5): preference access, the pane registration and the
@@ -211,6 +212,10 @@ export const prefsPane = {
     if (saveCache) {
       saveCache.addEventListener("click", () => prefsPane.saveCacheDir(doc));
     }
+    // The cloud AI group (P2): its own buttons and its first read live in
+    // src/settings/settingsPane.ts, so this file stays the pane's entry point
+    // and never grows the read/write rules itself.
+    mountCloud(doc);
     void prefsPane.refresh(doc);
     void prefsPane.refreshCache(doc);
   },

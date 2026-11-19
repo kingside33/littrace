@@ -390,6 +390,66 @@ test("no visible string escapes the registry in the TypeScript edge", () => {
   assert.ok(entry.length > 0);
 });
 
+test("the probe runs only from a click, never on pane load", () => {
+  const source = read(SETTINGS_PANE_TS);
+  // SECURITY.md: a request that happens without a user action or a setting is
+  // a bug. The probe is the one call here that reaches a metered third-party
+  // endpoint, so it must sit behind the test button's listener.
+  const probeCalls = [...source.matchAll(/serviceClient\(\)\.post\(\s*"([^"]+)"/g)].map(
+    (match) => match[1],
+  );
+  assert.ok(probeCalls.includes("/api/settings/test"), "the probe endpoint is used");
+  assert.equal(
+    probeCalls.filter((path) => path === "/api/settings/test").length,
+    1,
+    "the probe must have exactly one call site",
+  );
+  // ...and it must live in testCloud, not in the load path: opening the pane
+  // is not a user request to spend anything on a third-party endpoint.
+  const testCloud = source.slice(source.indexOf("export async function testCloud"));
+  const testCloudBody = testCloud.slice(0, testCloud.indexOf("\nexport ", 1));
+  assert.match(testCloudBody, /\/api\/settings\/test/, "the probe belongs to testCloud");
+  const loadCloud = source.slice(source.indexOf("export async function loadCloud"));
+  const loadCloudBody = loadCloud.slice(0, loadCloud.indexOf("\nexport ", 1));
+  assert.doesNotMatch(
+    loadCloudBody,
+    /\/api\/settings\/test/,
+    "loadCloud must not probe",
+  );
+  // The load path issues exactly one read, and never a write.
+  assert.match(loadCloudBody, /serviceClient\(\)\.get\("\/api\/settings"\)/);
+  assert.doesNotMatch(loadCloudBody, /serviceClient\(\)\.post\(/);
+});
+
+test("the cloud group writes through the shared client, never its own request", () => {
+  const source = read(SETTINGS_PANE_TS);
+  // The pane must not open a second HTTP path: the S4 client owns the token,
+  // the `errorDelayMax: 0` discipline and the failure classification.
+  assert.doesNotMatch(source, /Zotero\.HTTP\.request/);
+  assert.doesNotMatch(source, /\bXMLHttpRequest\b/);
+  assert.doesNotMatch(source, /\bfetch\(/);
+  assert.match(source, /import \{ serviceClient \} from "\.\.\/service-client"/);
+  // Every write goes through settingsCore's payload builders rather than a
+  // hand-built object, so the "never null" rule cannot be bypassed here.
+  assert.match(source, /savePayloadFrom\(readForm\(doc\)\)/);
+  assert.match(source, /clearKeyPayload\(\)/);
+});
+
+test("an unsupported platform issues no request at all", () => {
+  const source = read(SETTINGS_PANE_TS);
+  // kbapp/core/secrets.py raises RuntimeError off Windows, so a save there
+  // could only fail — and a request that cannot be acted on is an unsolicited
+  // request. Every entry point guards on the same predicate before it calls.
+  const guard = /if \(!platformSupportsCloud\(\)\) \{\s*return;\s*\}/;
+  for (const name of ["saveCloud", "clearKey", "testCloud"]) {
+    const body = source.slice(source.indexOf(`export async function ${name}`));
+    const slice = body.slice(0, body.indexOf("\nexport ", 1));
+    assert.match(slice, guard, `${name} must return before touching the client`);
+  }
+  // loadCloud uses the gate variant that also paints the reason card.
+  assert.match(source, /if \(!applyPlatformGate\(doc\)\) \{/);
+});
+
 test("the probe budget is strictly below the plugin's request timeout", async () => {
   // The plugin's only request path carries REQUEST_DISCIPLINE.timeout (ADR
   // 0018). A service probe that runs as long would make the client answer
