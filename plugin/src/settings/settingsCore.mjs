@@ -56,6 +56,7 @@ export const SETTINGS_GROUPS = Object.freeze([
  *
  * `key`     — the exact `kbapp/core/config.py` DEFAULTS key
  * `type`    — how the pane renders and reads it
+ * `section` — which pane group draws the row ("cloud" | "connection")
  * `sensitive` — the service returns a boolean for it, never the value
  * `labelKey` / `descriptionKey` — bare Fluent keys
  */
@@ -63,6 +64,7 @@ export const SETTINGS_FIELDS = Object.freeze([
   Object.freeze({
     key: "api_base",
     type: "text",
+    section: "cloud",
     sensitive: false,
     labelKey: "prefs-cloud-base",
     descriptionKey: "prefs-cloud-base-desc",
@@ -70,6 +72,7 @@ export const SETTINGS_FIELDS = Object.freeze([
   Object.freeze({
     key: "model",
     type: "text",
+    section: "cloud",
     sensitive: false,
     labelKey: "prefs-cloud-model",
     descriptionKey: "prefs-cloud-model-desc",
@@ -77,6 +80,7 @@ export const SETTINGS_FIELDS = Object.freeze([
   Object.freeze({
     key: "api_key",
     type: "password",
+    section: "cloud",
     sensitive: true,
     labelKey: "prefs-cloud-key",
     descriptionKey: "prefs-cloud-key-desc",
@@ -84,6 +88,7 @@ export const SETTINGS_FIELDS = Object.freeze([
   Object.freeze({
     key: "cloud_proxy",
     type: "text",
+    section: "cloud",
     sensitive: false,
     labelKey: "prefs-cloud-proxy",
     descriptionKey: "prefs-cloud-proxy-desc",
@@ -91,6 +96,7 @@ export const SETTINGS_FIELDS = Object.freeze([
   Object.freeze({
     key: "budget_mode",
     type: "select",
+    section: "cloud",
     sensitive: false,
     labelKey: "prefs-cloud-budget-mode",
     descriptionKey: "prefs-cloud-budget-mode-desc",
@@ -98,6 +104,7 @@ export const SETTINGS_FIELDS = Object.freeze([
   Object.freeze({
     key: "daily_budget",
     type: "number",
+    section: "cloud",
     sensitive: false,
     labelKey: "prefs-cloud-daily-budget",
     descriptionKey: "prefs-cloud-daily-budget-desc",
@@ -105,6 +112,7 @@ export const SETTINGS_FIELDS = Object.freeze([
   Object.freeze({
     key: "input_price",
     type: "number",
+    section: "cloud",
     sensitive: false,
     labelKey: "prefs-cloud-input-price",
     descriptionKey: "prefs-cloud-input-price-desc",
@@ -112,6 +120,7 @@ export const SETTINGS_FIELDS = Object.freeze([
   Object.freeze({
     key: "output_price",
     type: "number",
+    section: "cloud",
     sensitive: false,
     labelKey: "prefs-cloud-output-price",
     descriptionKey: "prefs-cloud-output-price-desc",
@@ -119,17 +128,27 @@ export const SETTINGS_FIELDS = Object.freeze([
   Object.freeze({
     key: "cloud_enabled",
     type: "bool",
+    section: "cloud",
     sensitive: false,
     labelKey: "prefs-cloud-enabled",
     descriptionKey: "prefs-cloud-enabled-desc",
+  }),
+  Object.freeze({
+    // The Zotero data directory the service reads a snapshot from. It lives
+    // beside the cloud rows because both are `settings.json`, not Zotero
+    // prefs — but it belongs to the connection group, and it crosses no
+    // secret boundary, so it stays editable on every platform.
+    key: "zotero_dir",
+    type: "text",
+    section: "connection",
+    sensitive: false,
+    labelKey: "prefs-zotero-dir",
+    descriptionKey: "prefs-zotero-dir-desc",
   }),
 ]);
 
 /** The two budget modes `store.save_settings` accepts. */
 export const BUDGET_MODES = Object.freeze(["limited", "unlimited"]);
-
-/** The raw keys `GET /api/settings` may carry; everything else is ignored. */
-const KNOWN_KEYS = new Set(SETTINGS_FIELDS.map((field) => field.key));
 
 /** A field by key, or null. */
 export function settingsField(key) {
@@ -138,6 +157,46 @@ export function settingsField(key) {
     return null;
   }
   return SETTINGS_FIELDS.find((field) => field.key === bare) ?? null;
+}
+
+/** Table rows for one pane section, in table order. */
+export function fieldsForSection(section) {
+  const wanted = String(section ?? "").trim();
+  if (!wanted) {
+    return [];
+  }
+  return SETTINGS_FIELDS.filter((field) => field.section === wanted);
+}
+
+/**
+ * The version rows a connection section shows, from diagnostics already read.
+ *
+ * Reuses the diagnostic rows rather than asking the service twice: the pane's
+ * health refresh already probes `/api/version`, and a second request for the
+ * same two facts would be both slower and one more thing to keep in step.
+ *
+ * `relationKey` is the diagnostic row's own Fluent key (`status-diag-version-*`),
+ * so the pane adds no fourth vocabulary for the same three states.
+ */
+export function versionViewFrom(rows) {
+  const byId = new Map();
+  if (Array.isArray(rows)) {
+    for (const entry of rows) {
+      if (entry && typeof entry === "object" && typeof entry.id === "string") {
+        byId.set(entry.id, entry);
+      }
+    }
+  }
+  const textOf = (entry) =>
+    entry && typeof entry.value === "string" && entry.value.length > 0 ? entry.value : null;
+  const relationRow = byId.get("version-relation");
+  return {
+    serviceVersion: textOf(byId.get("service-version")),
+    minServiceVersion: textOf(byId.get("requirement")),
+    relationKey:
+      relationRow && typeof relationRow.valueKey === "string" ? relationRow.valueKey : null,
+    tone: relationRow && typeof relationRow.tone === "string" ? relationRow.tone : "unknown",
+  };
 }
 
 /**
@@ -203,11 +262,18 @@ export function keyStored(view) {
  *   - sends `budget_mode` and `cloud_enabled` always, because they are the two
  *     switches the pane owns unconditionally.
  */
-export function savePayloadFrom(form) {
+export function savePayloadFrom(form, section = null) {
   const source =
     form && typeof form === "object" && !Array.isArray(form) ? form : {};
+  // A section filter keeps each pane group's save from writing fields it does
+  // not own. Without it, saving the cloud form would send an empty zotero_dir
+  // and quietly clear the directory the other group manages.
+  const wanted = typeof section === "string" && section.trim() ? section.trim() : null;
   const payload = {};
   for (const field of SETTINGS_FIELDS) {
+    if (wanted && field.section !== wanted) {
+      continue;
+    }
     const raw = source[field.key];
     if (field.sensitive) {
       const text = typeof raw === "string" ? raw.trim() : "";
@@ -343,6 +409,7 @@ export const PANE_FLUENT_KEYS = Object.freeze([
   "prefs-cloud-saving",
   "prefs-cloud-saved",
   "prefs-cloud-loading",
+  "prefs-cloud-loaded",
   "prefs-cloud-load-failed",
   "prefs-cloud-save-failed",
   "prefs-cloud-testing",
@@ -351,6 +418,7 @@ export const PANE_FLUENT_KEYS = Object.freeze([
   "prefs-cloud-clear-done",
   "prefs-cloud-clear-failed",
   "prefs-cloud-clear-hint",
+  "prefs-cloud-key-platform-unsupported",
   "prefs-cloud-save",
   "prefs-cloud-test",
   "prefs-cloud-model-not-listed",
@@ -358,6 +426,14 @@ export const PANE_FLUENT_KEYS = Object.freeze([
   "prefs-probe-detail",
   "prefs-platform-cloud-unsupported",
   "prefs-platform-cloud-unsupported-desc",
+  "prefs-zotero-dir-choose",
+  "prefs-zotero-dir-picker-title",
+  "prefs-zotero-dir-picker-failed",
+  "prefs-open-workbench",
+  "prefs-open-diagnostics",
+  "prefs-open-unavailable",
+  "prefs-version-service",
+  "prefs-version-requirement",
 ]);
 
 /** Every Fluent key this module references, in a stable order. */

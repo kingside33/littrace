@@ -60,28 +60,52 @@ export function prefKey(key) {
 }
 
 /**
- * The pane's groups, in order. `core` is the lifecycle pref (`enable`) and has
- * no pane section: it belongs to the plugin, not to a user decision about a
- * feature.
+ * The groups the pane shows, in order. `core` is the lifecycle pref
+ * (`enable`) and has no pane section: it belongs to the plugin, not to a user
+ * decision about a feature.
+ *
+ * `kind` says where a group's values live, and it is checkable rather than a
+ * comment:
+ *   - `prefs`  — rows in PREF_ENTRIES below, each with a declarative
+ *                `preference="<full key>"` binding in the pane markup;
+ *   - `server` — fields owned by the littrace service's `settings.json`
+ *                (src/settings/settingsCore.mjs), which can never have a
+ *                Zotero pref binding.
+ *
+ * The table is not what orders the pane — `addon/content/preferences.xhtml`
+ * does, by the order of its groupboxes. tests/test_plugin_prefs.cjs therefore
+ * compares the markup's heading order against this list, so a group that is
+ * added here but forgotten in the markup is a red build rather than a section
+ * that silently never appears.
  */
 export const PREF_GROUPS = Object.freeze([
   Object.freeze({
     id: "connection",
+    kind: "prefs",
     titleKey: "prefs-group-connection",
     descriptionKey: "prefs-group-connection-desc",
   }),
   Object.freeze({
+    id: "cloud",
+    kind: "server",
+    titleKey: "prefs-group-cloud",
+    descriptionKey: "prefs-group-cloud-desc",
+  }),
+  Object.freeze({
     id: "integration",
+    kind: "prefs",
     titleKey: "prefs-group-integration",
     descriptionKey: "prefs-group-integration-desc",
   }),
   Object.freeze({
     id: "cache",
+    kind: "prefs",
     titleKey: "prefs-group-cache",
     descriptionKey: "prefs-group-cache-desc",
   }),
   Object.freeze({
     id: "pro",
+    kind: "prefs",
     titleKey: "prefs-group-pro",
     descriptionKey: "prefs-group-pro-desc",
   }),
