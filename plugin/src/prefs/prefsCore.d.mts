@@ -66,3 +66,18 @@ export function normalizePort(value: unknown, fallback?: number): number;
 export function serviceBaseUrl(port: unknown): string;
 export function licenseView(response: unknown): LicenseView;
 export function platformCard(platform: string): PlatformCard;
+
+/** Result of validating a typed cache directory. */
+export interface CacheDirVerdict {
+  ok: boolean;
+  /** Normalized absolute path, or "" when the input was empty/refused. */
+  value: string;
+  /** Fluent key describing why it was refused, or null when ok. */
+  reason: string | null;
+}
+
+/** Empty means "server default"; anything non-empty must be absolute. */
+export declare function normalizeCacheDir(value: unknown): CacheDirVerdict;
+
+/** Binary-unit size for the cache readout ("1.5 KB", "5.0 MB"). */
+export declare function formatBytes(bytes: unknown): string;

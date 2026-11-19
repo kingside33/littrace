@@ -60,9 +60,9 @@ export function prefKey(key) {
 }
 
 /**
- * The three groups the pane shows, in order. `core` is the lifecycle pref
- * (`enable`) and has no pane section: it belongs to the plugin, not to a user
- * decision about a feature.
+ * The pane's groups, in order. `core` is the lifecycle pref (`enable`) and has
+ * no pane section: it belongs to the plugin, not to a user decision about a
+ * feature.
  */
 export const PREF_GROUPS = Object.freeze([
   Object.freeze({
@@ -74,6 +74,11 @@ export const PREF_GROUPS = Object.freeze([
     id: "integration",
     titleKey: "prefs-group-integration",
     descriptionKey: "prefs-group-integration-desc",
+  }),
+  Object.freeze({
+    id: "cache",
+    titleKey: "prefs-group-cache",
+    descriptionKey: "prefs-group-cache-desc",
   }),
   Object.freeze({
     id: "pro",
@@ -144,6 +149,20 @@ export const PREF_ENTRIES = Object.freeze([
     labelKey: "prefs-integration-reading-column",
     descriptionKey: "prefs-integration-reading-column-desc",
     readBy: "src/registry.ts registerWindowIndependent",
+  }),
+  Object.freeze({
+    // A string pref like connection.port: Zotero's declarative binding writes
+    // the input's string value, so validation lives in normalizeCacheDir()
+    // instead of in a hand-written setter. Empty means "the server default".
+    key: "cache.dir",
+    group: "cache",
+    type: "string",
+    default: "",
+    ui: "text",
+    requiresPro: false,
+    labelKey: "prefs-cache-dir",
+    descriptionKey: "prefs-cache-dir-desc",
+    readBy: "POST /api/settings {cache_dir} → kbapp/storage/store.py apply_cache_dir",
   }),
   Object.freeze({
     key: "pro.cross-check-report",
@@ -365,3 +384,63 @@ export const STARTUP_ONLY_KEYS = Object.freeze([
   "integration.column.lineage",
   "integration.column.reading",
 ]);
+
+/**
+ * Normalize the cache-directory pref for the settings page.
+ *
+ * Returns `{ ok, value, reason }`:
+ *   - empty input is valid and means "use the server default"
+ *     (`value: ""`), which is the only way to undo an override;
+ *   - an absolute path is valid as typed, trimmed;
+ *   - anything else is refused with a reason the pane shows next to the field.
+ *
+ * The plugin cannot check existence or writability: the path is on the machine
+ * running the *service*, which the plugin only reaches over HTTP. That check
+ * belongs to the server (store.apply_cache_dir) and its failure is what the
+ * user sees in the save result — a client-side "looks fine" is not evidence.
+ */
+export function normalizeCacheDir(value) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return Object.freeze({ ok: true, value: "", reason: null });
+  }
+  const normalized = text.replace(/\\/g, "/");
+  // "C:" alone is the current directory of that drive, not a root; only
+  // "C:/" (or a longer path) names a location unambiguously.
+  const absolute =
+    /^[A-Za-z]:\//.test(normalized) ||
+    normalized.startsWith("/") ||
+    /^\\\\/.test(text);
+  if (!absolute) {
+    return Object.freeze({
+      ok: false,
+      value: "",
+      reason: "cache-dir-not-absolute",
+    });
+  }
+  // A trailing separator would make the server create a differently spelled
+  // path on every save; strip it, keeping the root form ("C:/") intact.
+  const trimmed = normalized.length > 1 ? normalized.replace(/\/+$/, "") : normalized;
+  const safe = /^[A-Za-z]:$/.test(trimmed) ? `${trimmed}/` : trimmed;
+  return Object.freeze({ ok: true, value: safe, reason: null });
+}
+
+/**
+ * Human-readable size for the cache readout. Binary units, one decimal, because
+ * the number is shown next to a file count, not used for arithmetic.
+ */
+export function formatBytes(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n < 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = n;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  const rounded = index === 0 ? String(Math.round(value)) : value.toFixed(1);
+  return `${rounded} ${units[index]}`;
+}

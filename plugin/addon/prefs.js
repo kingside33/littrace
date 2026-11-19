@@ -12,9 +12,14 @@
 //
 // The two `pro.*` keys are M3 placeholders: declared so the pane can show them
 // disabled with 「需 Pro」, and read by nothing in the free plugin.
+// `cache.dir` is a string like `connection.port`: empty means "the service's
+// default (<data>/cache)". Its value is not consumed inside Zotero at all — the
+// pane forwards it to POST /api/settings and the service decides where its parse
+// caches live (issue #61). prefsCore.normalizeCacheDir() is the validator.
 pref("enable", true);
 pref("connection.port", "8765");
 pref("integration.column.lineage", true);
 pref("integration.column.reading", true);
+pref("cache.dir", "");
 pref("pro.cross-check-report", false);
 pref("pro.parallel-driver", false);

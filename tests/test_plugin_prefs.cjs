@@ -78,6 +78,7 @@ test("the table gives every feature its own pref and keeps Pro as placeholders",
   assert.deepEqual(core.PREF_GROUPS.map((group) => group.id), [
     "connection",
     "integration",
+    "cache",
     "pro",
   ]);
 
@@ -399,4 +400,97 @@ test("the settings page is registered through the plugin's single entry", async 
   assert.match(read(TABS_TS), /baseUrl: serviceBaseUrlFromPrefs\(\)/);
   // The table's default port mirrors the service's own default.
   assert.equal(core.DEFAULT_SERVICE_PORT, 8765);
+});
+
+// ── Cache directory (issue #61) ─────────────────────────────────────────────
+//
+// The cache group is the first pref whose value travels to the service instead
+// of staying in Zotero: the pane validates what it can (absolute or empty) and
+// forwards the rest, because existence and writability are properties of the
+// machine running the service.
+
+test("the cache pref is declared once and wired to the server setting", async () => {
+  const core = await loadCore();
+  const entry = core.prefEntry("cache.dir");
+  assert.ok(entry, "cache.dir must exist in the pref table");
+  assert.equal(entry.group, "cache");
+  assert.equal(entry.type, "string");
+  assert.equal(entry.ui, "text");
+  assert.equal(entry.default, "");
+  assert.equal(entry.requiresPro, false);
+  // The group must be declared, or the pane renders a section with no heading.
+  assert.ok(
+    core.PREF_GROUPS.some((group) => group.id === "cache"),
+    "the cache group must be in PREF_GROUPS",
+  );
+  assert.equal(core.prefKey("cache.dir"), "extensions.zotero.littrace.cache.dir");
+});
+
+test("normalizeCacheDir accepts empty and absolute, refuses the rest", async () => {
+  const { normalizeCacheDir } = await loadCore();
+  const bs = String.fromCharCode(92);
+
+  // Empty is the documented "use the server default" value, not an error.
+  assert.deepEqual(normalizeCacheDir(""), { ok: true, value: "", reason: null });
+  assert.deepEqual(normalizeCacheDir("   "), { ok: true, value: "", reason: null });
+  assert.deepEqual(normalizeCacheDir(null), { ok: true, value: "", reason: null });
+
+  // Absolute paths: forward and back slashes both normalize to forward, and a
+  // trailing separator is stripped so repeated saves cannot create "x" and "x/".
+  assert.deepEqual(normalizeCacheDir("/home/x/cache/"), { ok: true, value: "/home/x/cache", reason: null });
+  assert.deepEqual(normalizeCacheDir("E:/cache/x/"), { ok: true, value: "E:/cache/x", reason: null });
+  assert.deepEqual(normalizeCacheDir("E:" + bs + "cache" + bs + "x" + bs), { ok: true, value: "E:/cache/x", reason: null });
+  // A bare drive root keeps its separator.
+  assert.deepEqual(normalizeCacheDir("E:/"), { ok: true, value: "E:/", reason: null });
+
+  // Relative paths would resolve against the *service's* cwd, not the user's,
+  // so they are refused rather than guessed.
+  for (const bad of ["rel/path", "~/cache", "C:", ".", ".."]) {
+    const result = normalizeCacheDir(bad);
+    assert.equal(result.ok, false, `${bad} must be refused`);
+    assert.equal(result.reason, "cache-dir-not-absolute");
+    assert.equal(result.value, "");
+  }
+});
+
+test("formatBytes renders a human size and survives junk input", async () => {
+  const { formatBytes } = await loadCore();
+  assert.equal(formatBytes(0), "0 B");
+  assert.equal(formatBytes(512), "512 B");
+  assert.equal(formatBytes(1536), "1.5 KB");
+  assert.equal(formatBytes(5 * 1024 * 1024), "5.0 MB");
+  // A missing/garbage size must not print NaN into the pane.
+  assert.equal(formatBytes(null), "0 B");
+  assert.equal(formatBytes("bad"), "0 B");
+  assert.equal(formatBytes(-1), "0 B");
+});
+
+test("the pane markup has the cache field and the readout, and the .ftl files carry their keys", () => {
+  const xhtml = read(PANE_XHTML);
+  assert.match(
+    xhtml,
+    /preference="extensions\.zotero\.littrace\.cache\.dir"/,
+    "the cache field must bind the full pref key declaratively",
+  );
+  assert.match(xhtml, /id="littrace-prefs-cache-dir"/);
+  assert.match(xhtml, /id="littrace-prefs-cache-current"/);
+  assert.match(xhtml, /id="littrace-prefs-cache-save"/);
+
+  for (const locale of ["zh-CN", "en-US"]) {
+    const ftl = read(path.join(PLUGIN_DIR, "addon", "locale", locale, "addon.ftl"));
+    for (const key of [
+      "prefs-group-cache",
+      "prefs-group-cache-desc",
+      "prefs-cache-dir",
+      "prefs-cache-dir-desc",
+      "prefs-cache-current",
+      "prefs-cache-count",
+      "prefs-cache-default",
+      "prefs-cache-overridden",
+      "prefs-cache-reuse",
+      "prefs-cache-reuse-desc",
+    ]) {
+      assert.match(ftl, new RegExp(`^${key} =`, "m"), `${locale} is missing ${key}`);
+    }
+  }
 });

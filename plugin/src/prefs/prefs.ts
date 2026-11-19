@@ -2,10 +2,13 @@ import { config } from "../../package.json";
 import { t } from "../utils/locale";
 import {
   PANE_LABEL_KEY,
+  formatBytes,
+  normalizeCacheDir,
   prefEntry,
   prefKey,
 } from "./prefsCore.mjs";
 import { serviceBaseUrlFromPrefs } from "./serviceOrigin";
+import { serviceClient } from "../service-client";
 import { probeHealth } from "../status/diagnostics";
 import { dotView } from "../status/statusCore.mjs";
 
@@ -32,6 +35,38 @@ function report(error: unknown, what: string): void {
       ? new Error(`littrace 设置页(${what}): ${error.message}`)
       : new Error(`littrace 设置页(${what}): ${String(error)}`),
   );
+}
+
+/** The service's cache projection (`GET /api/settings` → `cache`). */
+interface CacheInfo {
+  /** Effective cache directory the service uses right now. */
+  path: string;
+  /** `<data>/cache`, the value an empty setting falls back to. */
+  default_path: string;
+  /** Whether a custom directory is in force. */
+  overridden: boolean;
+  exists: boolean;
+  files: number;
+  bytes: number;
+}
+
+/** The settings map the service returns; only the fields used here are typed. */
+interface SettingsPayload {
+  cache_dir?: string;
+  cache?: CacheInfo;
+}
+
+async function fetchSettings(): Promise<SettingsPayload> {
+  return (await serviceClient().get("/api/settings")) as SettingsPayload;
+}
+
+async function postSettings(values: {
+  cache_dir: string;
+}): Promise<SettingsPayload> {
+  return (await serviceClient().post(
+    "/api/settings",
+    values,
+  )) as SettingsPayload;
 }
 
 /** One pref by bare table key, falling back to the table default. */
@@ -170,7 +205,110 @@ export const prefsPane = {
     if (refresh) {
       refresh.addEventListener("click", () => prefsPane.refresh(doc));
     }
+    // The cache row: read the current server-side cache on load, and forward a
+    // typed directory when the user applies it (issue #61).
+    const saveCache = doc.getElementById("littrace-prefs-cache-save");
+    if (saveCache) {
+      saveCache.addEventListener("click", () => prefsPane.saveCacheDir(doc));
+    }
     void prefsPane.refresh(doc);
+    void prefsPane.refreshCache(doc);
+  },
+
+  /**
+   * Show where the service's cache actually is, and how big it is.
+   *
+   * The pane never guesses: this is a GET of the same settings endpoint the
+   * service page uses, so an offline service shows "unavailable" instead of a
+   * stale path.
+   */
+  refreshCache(doc: Document): void {
+    const row = doc.getElementById("littrace-prefs-cache-current");
+    if (!row) {
+      return;
+    }
+    row.setAttribute("data-l10n-id", "littrace-prefs-cache-checking");
+    void (async () => {
+      try {
+        const settings = await fetchSettings();
+        const cache = settings.cache as CacheInfo | undefined;
+        if (!row.isConnected) {
+          return;
+        }
+        if (!cache) {
+          row.textContent = t("prefs-cache-unavailable");
+          return;
+        }
+        row.textContent = `${cache.path}(${t("prefs-cache-count", {
+          args: { files: String(cache.files), size: formatBytes(cache.bytes) },
+        })})`;
+        const hint = doc.getElementById("littrace-prefs-cache-default");
+        if (hint) {
+          hint.textContent = t("prefs-cache-default", {
+            args: { path: cache.default_path },
+          });
+        }
+      } catch (error) {
+        if (row.isConnected) {
+          row.textContent = t("prefs-cache-unavailable");
+        }
+        report(error, "读取缓存信息");
+      }
+    })();
+  },
+
+  /**
+   * Validate what the plugin can validate, then let the service decide.
+   *
+   * Emptiness and absoluteness are client-side facts; existence and
+   * writability are properties of the machine running the service, so the
+   * answer the user sees is the service's, not a guess here. A refused path
+   * leaves the stored pref as typed so the user can fix it.
+   */
+  saveCacheDir(doc: Document): void {
+    const input = doc.getElementById(
+      "littrace-prefs-cache-dir",
+    ) as HTMLInputElement | null;
+    const result = doc.getElementById("littrace-prefs-cache-result");
+    if (!input) {
+      return;
+    }
+    const normalized = normalizeCacheDir(input.value);
+    if (!normalized.ok) {
+      if (result) {
+        result.hidden = false;
+        result.textContent = t("prefs-cache-error", {
+          args: { reason: t(String(normalized.reason)) },
+        });
+      }
+      return;
+    }
+    input.value = normalized.value;
+    void (async () => {
+      try {
+        const saved = await postSettings({ cache_dir: normalized.value });
+        const cache = saved.cache as CacheInfo | undefined;
+        if (result && cache) {
+          result.hidden = false;
+          result.textContent = t("prefs-cache-saved", {
+            args: {
+              path: cache.path,
+              files: String(cache.files),
+              size: formatBytes(cache.bytes),
+            },
+          });
+        }
+        prefsPane.refreshCache(doc);
+      } catch (error) {
+        if (result) {
+          result.hidden = false;
+          result.textContent = t("prefs-cache-error", {
+            args: { reason: String((error as Error)?.message ?? error) },
+          });
+        }
+        report(error, "保存缓存目录");
+      }
+    })();
   },
 
   refresh(doc: Document): void {

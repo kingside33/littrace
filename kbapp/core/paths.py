@@ -49,18 +49,29 @@ def legacy_target(relative):
 class Paths:
     base: Path
     data: Path
+    # Optional override for the cache subtree only. `None` keeps the historical
+    # layout (`<data>/cache`), so an installation that never sets it behaves
+    # exactly as before. A configured path lets a user keep derived data (OCR
+    # pages, extraction caches, model responses) on another disk while state,
+    # indexes and files stay next to the library. Never narrowed to a single
+    # cache kind: every consumer already reads `paths.cache`, so one override
+    # covers them all.
+    cache_root: Path | None = None
 
     @classmethod
-    def from_base(cls, base=None, data_dir=None):
+    def from_base(cls, base=None, data_dir=None, cache_dir=None):
         project = Path(base or os.environ.get('KB_BASE') or Path(__file__).resolve().parents[2]).resolve()
         environment_data = os.environ.get('KB_DATA_DIR') if base is None or project == Path(os.environ.get('KB_BASE', project)).resolve() else None
         data = Path(data_dir or environment_data or project / '_index').resolve()
-        return cls(project, data)
+        environment_cache = os.environ.get('KB_CACHE_DIR') if base is None else None
+        cache = Path(cache_dir or environment_cache).resolve() if (cache_dir or environment_cache) else None
+        return cls(project, data, cache)
 
     @classmethod
-    def for_data(cls, data):
+    def for_data(cls, data, cache_dir=None):
         data = Path(data).resolve()
-        return cls(data.parent, data)
+        cache = Path(cache_dir).resolve() if cache_dir else None
+        return cls(data.parent, data, cache)
 
     @property
     def state(self):
@@ -72,7 +83,16 @@ class Paths:
 
     @property
     def cache(self):
+        return self.cache_root if self.cache_root is not None else self.data / 'cache'
+
+    @property
+    def default_cache(self):
+        """The historical cache location, regardless of any override."""
         return self.data / 'cache'
+
+    @property
+    def cache_overridden(self):
+        return self.cache_root is not None
 
     @property
     def files(self):
@@ -108,7 +128,8 @@ class Paths:
 
     def ensure_layout(self):
         for name in DIRECTORIES:
-            (self.data / name).mkdir(parents=True, exist_ok=True)
+            target = self.cache if name == 'cache' else self.data / name
+            target.mkdir(parents=True, exist_ok=True)
 
     @property
     def assets(self):

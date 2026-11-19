@@ -18,6 +18,7 @@ class Store:
         self.root = self.paths.data
         self.paths.state.mkdir(parents=True, exist_ok=True)
         self.path = self.paths.database
+        self.apply_cache_dir()
         with self.db() as db:
             db.executescript("""
             CREATE TABLE IF NOT EXISTS state(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -91,6 +92,57 @@ class Store:
         with self.db() as db:
             db.execute('INSERT OR REPLACE INTO state VALUES(?,?)', (key, json.dumps(value, ensure_ascii=False)))
 
+    def apply_cache_dir(self):
+        """Point `paths.cache` at the configured directory, if any.
+
+        Called at construction and again after settings change, so a saved
+        choice takes effect without restarting the service. An empty setting
+        means "use `<data>/cache`", which is what a fresh install has always
+        done. The directory is created on demand; a path that cannot be created
+        or written raises, and the caller turns that into a visible error
+        instead of silently falling back (a silent fallback would scatter
+        caches across two disks with no way to tell which one is in use).
+        """
+        from kbapp.core.paths import Paths
+        configured = str(self.settings().get('cache_dir') or '').strip()
+        if not configured:
+            if self.paths.cache_root is None:
+                return self.paths.cache
+            self.paths = Paths(self.paths.base, self.paths.data)
+            return self.paths.cache
+        from pathlib import Path
+        target = Path(configured).expanduser()
+        if not target.is_absolute():
+            raise ValueError(f'缓存目录需为绝对路径：{configured}')
+        target.mkdir(parents=True, exist_ok=True)
+        probe = target / '.littrace-write-probe'
+        try:
+            probe.write_text('ok', encoding='utf-8')
+        finally:
+            probe.unlink(missing_ok=True)
+        self.paths = Paths(self.paths.base, self.paths.data, target.resolve())
+        return self.paths.cache
+
+    def cache_info(self):
+        """What the settings page shows: where the cache is and how much is in it."""
+        root = self.paths.cache
+        files = 0
+        size = 0
+        if root.is_dir():
+            for entry in root.rglob('*'):
+                if entry.is_file():
+                    files += 1
+                    with contextlib.suppress(OSError):
+                        size += entry.stat().st_size
+        return {
+            'path': str(root),
+            'default_path': str(self.paths.default_cache),
+            'overridden': self.paths.cache_overridden,
+            'exists': root.is_dir(),
+            'files': files,
+            'bytes': size,
+        }
+
     def settings(self, public=False):
         result = dict(DEFAULTS)
         data = read_json(self.paths.state / 'settings.json', {})
@@ -146,6 +198,13 @@ class Store:
                 raise ValueError('限额模式需填写输入/输出价格与每日限额；暂不限制需明确选择不限额模式')
         encrypted = {k: protect(v) if k in {'api_key', 'openalex_key'} else v for k, v in current.items()}
         atomic(self.paths.state / 'settings.json', encrypted)
+        # A cache location change must take effect now, not on the next restart.
+        # A path that cannot be created or written raises here, after the other
+        # settings were already saved: the caller reports it, and the stored
+        # value is the one the user asked for (so a fixed path retries cleanly
+        # instead of half-applying).
+        if 'cache_dir' in values:
+            self.apply_cache_dir()
         return self.settings(public=True)
 
     def active_dir(self):
