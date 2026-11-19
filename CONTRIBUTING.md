@@ -323,9 +323,9 @@ must not touch the file. The format:
 ```
 
 - `类` is `别这样` (do not do this) or `照这样` (do this).
-- `Seen` lists distinct dates in ascending order; the same day counts once.
-- `证据` lists issue numbers only. This repository files an issue before a fix,
-  so every lesson has a traceable origin.
+- `Seen` lists distinct dates in ascending order; do not repeat a date.
+- `证据` lists issue or pull request numbers only. This repository files an
+  issue before a fix, so a defect always has a traceable origin.
 - Numbers are unique and only increase; never reuse one.
 
 Promotion: after the same lesson appears on three distinct dates, write the rule

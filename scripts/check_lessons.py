@@ -18,14 +18,20 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 ENTRY = re.compile(r'^### (L-\d{3,}) (.+)$')
 FIELD = re.compile(r'^- (类|Seen|为什么|证据):\s*(.*)$')
-PROMOTED = re.compile(r'^(.*?)\s*→\s*(\S+)$')
+PROMOTED = re.compile(r'^(.*?)\s+→\s+(\S+\.md)$')
 ISSUE = re.compile(r'^#\d+$')
 ISO_DATE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+# 任何「像条目」的标题都要走 ENTRY 校验,否则畸形标题会连同条目一起被静默忽略。
+HEADING = re.compile(r'^\s*#{1,6}\s*[Ll]-\d')
+# 仓库自己的 pluginID 形似邮箱,但它是公开标识,不是个人信息。
+ALLOWED_EMAILS = {'littrace@kingside33.github.io'}
 PRIVACY = (
-    (re.compile(r'[A-Za-z]:\\Users\\', re.IGNORECASE), '本机用户目录路径'),
+    (re.compile(r'[A-Za-z]:\\'), '本机绝对路径'),
     (re.compile(r'/Users/'), '本机用户目录路径'),
+    (re.compile(r'/home/'), '本机用户目录路径'),
     (re.compile(r'~/'), '本机用户目录路径'),
     (re.compile(r'[\w.+-]+@[\w-]+\.[\w.-]+'), '邮箱地址'),
+    (re.compile(r'\b(?:f[cd][0-9a-f]{2}|fe80)::', re.IGNORECASE), 'IPv6 私网地址'),
     (re.compile(r'\b(?:10|127)\.\d{1,3}\.\d{1,3}\.\d{1,3}\b'), '私网 IP'),
     (re.compile(r'\b192\.168\.\d{1,3}\.\d{1,3}\b'), '私网 IP'),
     (re.compile(r'\b172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}\b'), '私网 IP'),
@@ -67,8 +73,11 @@ def split_seen(value, number, errors):
 def check_privacy(lines, errors):
     for number, line in enumerate(lines, start=1):
         for pattern, label in PRIVACY:
-            if pattern.search(line):
-                errors.append((number, f'疑似{label},公开仓库不得写入:{line.strip()!r}'))
+            matches = [match.group(0) for match in pattern.finditer(line)]
+            if label == '邮箱地址':
+                matches = [match for match in matches if match not in ALLOWED_EMAILS]
+            if matches:
+                errors.append((number, f'疑似{label},公开仓库不得写入:{matches[0]!r}'))
 
 
 def finalize(entry, root, errors):
@@ -87,7 +96,7 @@ def finalize(entry, root, errors):
         path = root / target
         if not path.is_file():
             errors.append((number, f'{entry["id"]} 指针目标不存在:{target}'))
-        elif entry['id'] not in path.read_text(encoding='utf-8'):
+        elif not re.search(rf'\b{re.escape(entry["id"])}\b', path.read_text(encoding='utf-8')):
             errors.append((number, f'{entry["id"]} 指针目标 {target} 里没有引用该编号'))
         return
 
@@ -127,50 +136,74 @@ def finalize(entry, root, errors):
             errors.append((number, f'{entry["id"]} 证据不能为空'))
         for part in (item.strip() for item in evidence.split(',')):
             if not ISSUE.match(part):
-                errors.append((number, f'{entry["id"]} 证据应为 issue 编号(#N):{part!r}'))
+                errors.append((number, f'{entry["id"]} 证据应为 issue 或 PR 编号(#N):{part!r}'))
 
 
 def parse(path, root):
     errors = []
-    text = path.read_text(encoding='utf-8')
-    size = len(text.encode('utf-8'))
+    payload = path.read_bytes()
+    size = len(payload)
     if size > MAX_BYTES:
         errors.append((0, f'文件 {size} 字节,超过 {MAX_BYTES} 字节上限'))
+    try:
+        text = payload.decode('utf-8')
+    except UnicodeDecodeError as exc:
+        errors.append((0, f'文件不是合法 UTF-8:{exc}'))
+        return [], errors
     lines = text.splitlines()
     check_privacy(lines, errors)
 
     entries = []
     current = None
     in_fence = False
+    fence_line = 0
     for number, raw in enumerate(lines, start=1):
         if raw.strip().startswith('```'):
-            in_fence = not in_fence
+            if in_fence:
+                in_fence = False
+            else:
+                in_fence = True
+                fence_line = number
             continue
         if in_fence:
+            continue
+        if HEADING.match(raw):
+            if current is not None:
+                finalize(current, root, errors)
+                entries.append(current)
+                current = None
+            match = ENTRY.match(raw)
+            if not match:
+                errors.append(
+                    (
+                        number,
+                        '条目标题必须写成 `### L-001 <标题>`:'
+                        '三级标题、大写 L、至少三位数字、标题非空',
+                    )
+                )
+                continue
+            entry_id, rest = match.groups()
+            promoted = None
+            promoted_match = PROMOTED.match(rest)
+            if promoted_match:
+                promoted = (promoted_match.group(1).strip(), promoted_match.group(2))
+            current = {
+                'id': entry_id,
+                'title': rest,
+                'line': number,
+                'fields': {},
+                'order': [],
+                'duplicate': [],
+                'unknown': [],
+                'promoted': promoted,
+                'seen': [],
+            }
             continue
         if raw.startswith('#'):
             if current is not None:
                 finalize(current, root, errors)
                 entries.append(current)
                 current = None
-            match = ENTRY.match(raw)
-            if match:
-                entry_id, rest = match.groups()
-                promoted = None
-                promoted_match = PROMOTED.match(rest)
-                if promoted_match:
-                    promoted = (promoted_match.group(1).strip(), promoted_match.group(2))
-                current = {
-                    'id': entry_id,
-                    'title': rest,
-                    'line': number,
-                    'fields': {},
-                    'order': [],
-                    'duplicate': [],
-                    'unknown': [],
-                    'promoted': promoted,
-                    'seen': [],
-                }
             continue
         if current is None:
             continue
@@ -179,10 +212,9 @@ def parse(path, root):
             name, value = match.groups()
             if name in current['fields']:
                 current['duplicate'].append(name)
-                current['fields'][name] += ' ' + value
             else:
                 current['fields'][name] = value
-            current['order'].append(name)
+                current['order'].append(name)
             continue
         if not raw.strip():
             continue
@@ -194,6 +226,9 @@ def parse(path, root):
                 current['fields'][last] += '\n' + raw.strip()
             continue
         current['unknown'].append(number)
+
+    if in_fence:
+        errors.append((fence_line, '代码围栏未闭合,其后的条目不会被校验'))
 
     if current is not None:
         finalize(current, root, errors)
