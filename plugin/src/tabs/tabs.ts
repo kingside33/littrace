@@ -7,12 +7,15 @@ import {
   DEFAULT_OPEN_MECHANISM,
   bridgePlan,
   createCleanupLedger,
+  hasResultContainer,
   isDeepLink,
   locateRefusalOf,
   locateRequestOf,
+  readTabId,
   resolveOpenPlan,
   reuseVerdict,
   tabById,
+  tabDataPayload,
   tabNodeSpec,
 } from "./tabsCore.mjs";
 import type {
@@ -62,17 +65,30 @@ const OPEN_MECHANISM = DEFAULT_OPEN_MECHANISM;
 /** THE switch point for the deep-link bridge. */
 const BRIDGE_MODE = DEFAULT_BRIDGE_MODE;
 
-/** Shape of the internal Zotero_Tabs API this file touches (真机定案). */
+/**
+ * Shape of the internal Zotero_Tabs API this file touches (真机定案, Zotero 10.0.8).
+ *
+ * `add()` returns `{ id, container }`, NOT a bare id string: the container is
+ * a XUL `<tab-content>` element that Zotero has already appended to its deck.
+ * The `data` option is stored verbatim on the tab record; omitting it leaves
+ * `tab.data === undefined`, which Zotero's own tab renderer dereferences
+ * (e.g. `tab.data.icon` on reader tabs) and which therefore must be supplied.
+ */
+interface ZoteroTabAddResult {
+  id?: unknown;
+  container?: unknown;
+}
+
 interface ZoteroTabsAPI {
   add(options: Record<string, unknown>): unknown;
   close?(tabID: string): unknown;
   select?(tabID: string): unknown;
-  _tabs?: Array<{ id?: string; container?: unknown }>;
+  _tabs?: Array<{ id?: string; container?: unknown; data?: unknown }>;
 }
 
 /** One tab this host opened, and what it takes to host or release it. */
 interface OpenedTab {
-  iframe: HTMLIFrameElement;
+  iframe: TabContentNode;
   /** Bring the hosting tab or window to the front; best effort. */
   focusHost: () => void;
   /** Release the hosting tab or window; must not call back into this host. */
@@ -415,19 +431,24 @@ function mountInZoteroTab(
   }
   let result: unknown;
   try {
-    // 待真机定案: 选项名、返回值与容器取法都是非公开机制。
+    // 已真机定案 (Zotero 10.0.8): `data` 会被原样存进 tab 记录,缺省会留下
+    // `tab.data === undefined`,Zotero 自己的 tab 渲染会去读它;这里给一个空对象
+    // 作为占位,让 tab 记录的形状始终成立。
     result = tabs.add({
       type: `${config.addonRef}-${entry.id}`,
       title: t(entry.titleKey),
       select: true,
+      data: tabDataPayload(),
       onClose: onHostClose,
     });
   } catch (error) {
     report(error, "Zotero_Tabs.add");
     return null;
   }
-  const tabID = typeof result === "string" && result.length > 0 ? result : null;
-  const container = tabID ? findTabContainer(window, tabs, tabID) : null;
+  // 已真机定案: 返回 `{ id, container }` 而不是 id 字符串。两种形态都接受,
+  // 但对象形态是 Zotero 10 的真实契约。
+  const tabID = readTabID(result);
+  const container = readTabContainer(result) ?? (tabID ? findTabContainer(window, tabs, tabID) : null);
   if (!tabID || !container) {
     if (tabID) {
       closeZoteroTab(tabs, tabID);
@@ -437,7 +458,9 @@ function mountInZoteroTab(
   }
   try {
     const iframe = createIframe(window, entry, spec);
-    container.append(iframe);
+    // XUL `<tab-content>` predates `ParentNode.append`; `appendChild` is the
+    // one call that inserts into both XUL and HTML parents.
+    container.appendChild(iframe);
     // The deck's own close notification is not a public API, so `hostClosed`
     // is only a signal: `isConnected` (checked below) is the one that holds
     // even when the option name is ignored by the real build.
@@ -476,6 +499,22 @@ function mountInZoteroTab(
  * the fallback for the same internal mechanism. Returning null makes the
  * caller switch to the dialog instead of throwing.
  */
+/**
+ * The tab id from whatever `Zotero_Tabs.add` returned. The parsing lives in
+ * the tested pure module (`tabsCore.mjs`), so the shape is asserted once.
+ */
+function readTabID(result: unknown): string | null {
+  return readTabId(result);
+}
+
+/** The deck container `Zotero_Tabs.add` already appended, when it handed one back. */
+function readTabContainer(result: unknown): HTMLElement | null {
+  if (!hasResultContainer(result)) {
+    return null;
+  }
+  return (result as ZoteroTabAddResult).container as HTMLElement;
+}
+
 function findTabContainer(
   window: Window,
   tabs: ZoteroTabsAPI,
@@ -609,21 +648,64 @@ function mountInDialog(
   };
 }
 
-/** The iframe itself. The service page owns everything inside the frame. */
+/**
+ * The content host for a function tab.
+ *
+ * Where the node is created decides whether remote content can load at all:
+ *
+ * - A **XUL** document (Zotero's tab deck `<tab-content>`, and the fallback
+ *   window's `openDialog("about:blank")`) needs a XUL `<browser type="content">`.
+ *   An `<iframe>` — HTML or XUL — does not become a remote-content container
+ *   there, which is why the frame rendered empty in 真机 acceptance.
+ * - An **HTML** document takes a plain `<iframe>`.
+ *
+ * Both expose `src`, `contentDocument`/`contentWindow` and `addEventListener`,
+ * so the rest of this file treats them uniformly through `TabContentNode`.
+ */
+interface TabContentNode extends HTMLElement {
+  src: string;
+  contentDocument: Document | null;
+  contentWindow: Window | null;
+}
+
+const XUL_NS =
+  "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
+
 function createIframe(
   owner: Window,
   entry: TabEntry,
   spec: TabNodeSpec,
-): HTMLIFrameElement {
-  const iframe = owner.document.createElement("iframe");
-  iframe.src = spec.src;
-  iframe.title = t(entry.titleKey);
-  iframe.dataset.littraceTab = entry.id;
-  iframe.style.border = "0";
-  iframe.style.width = "100%";
-  iframe.style.height = "100%";
-  iframe.style.display = "block";
-  return iframe;
+): TabContentNode {
+  const doc = owner.document as Document & {
+    createXULElement?: (name: string) => Element;
+  };
+  const isXUL = doc.documentElement?.namespaceURI === XUL_NS;
+  const node = (
+    isXUL && typeof doc.createXULElement === "function"
+      ? doc.createXULElement("browser")
+      : doc.createElement("iframe")
+  ) as unknown as TabContentNode;
+  if (isXUL) {
+    // The XUL remote-content container, configured exactly as Zotero does for
+    // its own content browser (chrome/content/zotero/elements/abstractBox.js):
+    // `type="content"` makes it a remote-content host; `remote="false"` +
+    // `maychangeremoteness="true"` are what FX128+ requires, otherwise the
+    // element stays blank with no navigation attempt at all (真机 acceptance
+    // on Zotero 10.0.8: zero requests reached the service without them).
+    node.setAttribute("type", "content");
+    node.setAttribute("remote", "false");
+    node.setAttribute("maychangeremoteness", "true");
+    node.setAttribute("disablehistory", "true");
+    node.setAttribute("flex", "1");
+  }
+  node.src = spec.src;
+  node.title = t(entry.titleKey);
+  node.dataset.littraceTab = entry.id;
+  node.style.border = "0";
+  node.style.width = "100%";
+  node.style.height = "100%";
+  node.style.display = "block";
+  return node;
 }
 
 /**

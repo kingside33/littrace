@@ -396,3 +396,61 @@ export function locateRequestOf(detail) {
     paper: `z:${libraryID}:${itemKey}`,
   });
 }
+
+/**
+ * The tab id from whatever `Zotero_Tabs.add` returned.
+ *
+ * 真机定案 (Zotero 10.0.8, `chrome/content/zotero/tabs.js`): `add()` returns
+ * `{ id, container }`, not a bare id string. The string form is still
+ * accepted so one shape change cannot break the primary path silently.
+ * Returns null when neither shape carries a usable id.
+ */
+export function readTabId(result) {
+  if (typeof result === "string") {
+    return result.length > 0 ? result : null;
+  }
+  if (result === null || typeof result !== "object") {
+    return null;
+  }
+  const id = result.id;
+  return typeof id === "string" && id.length > 0 ? id : null;
+}
+
+/**
+ * Whether a `Zotero_Tabs.add` result already carries the deck container.
+ *
+ * 真机定案: Zotero 10 creates the XUL `<tab-content>` itself, appends it to
+ * the deck and hands it back, so the caller does not have to find it by id.
+ * Duck-typed on `append` because the node comes from Zotero's realm, where
+ * the plugin sandbox's `Element` constructor does not match.
+ */
+export function hasResultContainer(result) {
+  if (result === null || typeof result !== "object") {
+    return false;
+  }
+  const container = result.container;
+  return (
+    container !== null &&
+    typeof container === "object" &&
+    typeof container.append === "function"
+  );
+}
+
+/**
+ * The `data` payload a tab record needs.
+ *
+ * 真机定案: `Zotero_Tabs.add` stores `data` verbatim on the tab record, and
+ * Zotero's own tab renderer dereferences it (`tab.data.icon`). Omitting it
+ * leaves `tab.data === undefined` and that renderer throws. Whatever the
+ * caller does or does not know, the record must therefore always get an
+ * object. Caller-supplied fields win; the result is a fresh plain object.
+ */
+export function tabDataPayload(extra) {
+  const base = {};
+  if (extra !== null && typeof extra === "object" && !Array.isArray(extra)) {
+    for (const [key, value] of Object.entries(extra)) {
+      base[key] = value;
+    }
+  }
+  return base;
+}

@@ -95,3 +95,12 @@ export declare function resolveOpenPlan(
 export declare function locateRequestOf(detail: unknown): LocateRequest | null;
 export declare function locateRefusalOf(detail: unknown): string | null;
 export declare function reuseVerdict(input?: ReuseSignals): ReuseVerdict;
+
+/** The tab id from a `Zotero_Tabs.add` result: bare string or `{ id }`. */
+export declare function readTabId(result: unknown): string | null;
+/** Whether a `Zotero_Tabs.add` result already carries the deck container. */
+export declare function hasResultContainer(result: unknown): boolean;
+/** The `data` payload for a tab record; always a plain object. */
+export declare function tabDataPayload(
+  extra?: unknown,
+): Record<string, unknown>;
