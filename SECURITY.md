@@ -125,6 +125,12 @@ usage beacon, no account and no background version check. Outbound requests
 serve only a capability the user configured or invoked:
 
 - the model endpoint configured in settings;
+- a `GET {api_base}/models` probe the user explicitly triggered from the
+  plugin settings page's 「测试连接」 button (`POST /api/settings/test`). It
+  carries no prompt, reserves no budget, writes no `usage` row, uses the
+  already-saved configuration (the request body cannot redirect it), and
+  refuses any redirect that changes host or scheme so the bearer key cannot
+  be forwarded to a third party;
 - OpenAlex and, where configured, Crossref;
 - an optional local HTTP proxy;
 - Ollama on `http://127.0.0.1:11434` (`kbapp/core/config.py:20`);
