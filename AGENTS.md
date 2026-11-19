@@ -85,12 +85,26 @@ gh pr create --base main --body-file -                       # 正文第一段 C
 - **报告问题不算提 issue**:口头/会话里说「这里好像有问题」不构成记录,
   必须落到 GitHub issue 才算。
 
+### 错题本:教训先记录,重复三次才升级
+
+犯过的错与值得照抄的做法记在 `docs/lessons.md`,格式与升级规则见
+CONTRIBUTING.md 的「Lessons(错题本)」。动手改代码与评审之前,先读与本次
+改动相关的条目。
+
+- **只在独立 PR 里写**:功能 PR 不改 `docs/lessons.md`,避免并行 PR 撞车,
+  也避免夹带无关文件。
+- **三个不同日期才升级**:同一条目在 3 个不同日期出现后,把规则写进本文件、
+  CONTRIBUTING.md 或新 ADR,条目压缩成一行指针。
+- **规则要有证据**:`证据` 只写 issue 编号,与本仓库「先提 issue 再提 PR」
+  的纪律一致。
+
 ## 验证入口(与 ci.yml 一致)
 
 ```sh
 ruff check                                                    # python-lint
 python -m pytest -m "not network and not model"               # pytest 离线套件(与 ci.yml 同款)
 node --test <ci.yml 显式清单>                                  # node 测试
+python scripts/check_lessons.py                               # 错题本格式与隐私
 python kb.py doctor architecture                              # 架构守卫
 cd plugin && npm run build                                    # 插件构建(plugin/ 存在后)
 ```
@@ -124,6 +138,7 @@ cd plugin && npm run build                                    # 插件构建(plu
 | 主题 | 文件 |
 | --- | --- |
 | 贡献流程、红线全文、DCO | CONTRIBUTING.md |
+| 错题本与教训升级 | docs/lessons.md |
 | 平台/版本支持口径 | docs/support-matrix.json |
 | 架构决策 | docs/adr/README.md |
 | 安全 | SECURITY.md |
