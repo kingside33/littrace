@@ -71,6 +71,18 @@ def install(app, context, token):
         # the confirmation if that second call fails).
         return dict(store.save_settings(values), cache=store.cache_info())
 
+    @app.post('/api/settings/test')
+    def settings_test():
+        # 同步 def，不是 async def：单进程 uvicorn 下同步端点由 starlette 丢线程池，
+        # 探测的阻塞（最多 PROBE_TIMEOUT_S 秒）只占一个线程，不会卡住插件每 30 秒
+        # 一次的 /api/version 状态点轮询。/api/ask 是同一先例。
+        #
+        # 不接收请求体：一律探测**已保存**的配置。save_settings 的 HTTPS/loopback
+        # 限制是唯一的 URL 校验路径，从这里再收一个地址等于多开一条把 Bearer 密钥
+        # 发往任意地址的入口。
+        from kbapp.integrations.cloud import probe_models
+        return probe_models(store)
+
     @app.post('/api/jobs')
     def jobs(data: dict):
         if data.get('action') == 'vectors':

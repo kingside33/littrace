@@ -66,7 +66,7 @@
   "cloud": {
     "status": "optional",
     "protocol": "OpenAI-compatible /chat/completions",
-    "note": "Cloud verification is off by default and is configured in the settings page with an endpoint and key. The reference setup was exercised with DeepSeek-V4.1-Flash; other OpenAI-compatible endpoints are not verified. Cited answers and method-relation verification require a configured cloud endpoint; ingest, indexing, search and offline export do not."
+    "note": "Cloud verification is off by default and is configured in the settings page with an endpoint and key. The reference setup was exercised with DeepSeek-V4.1-Flash; other OpenAI-compatible endpoints are not verified. Cited answers and method-relation verification require a configured cloud endpoint; ingest, indexing, search and offline export do not. Connectivity can be checked before enabling it: POST /api/settings/test issues one GET {api_base}/models against the saved configuration, at zero token cost and with a 5 s budget (below the plugin's 10 s request timeout). The probe proves reachability and that credentials were accepted; it does not prove the configured model can infer, and endpoints without /models report as unsupported rather than OK."
   },
   "out_of_scope": [
     "builds modified by the user, including patched dependencies or a forked kbapp",
