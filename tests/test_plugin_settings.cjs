@@ -22,6 +22,9 @@ const ROOT = path.join(__dirname, "..");
 const PLUGIN_DIR = path.join(ROOT, "plugin");
 const SETTINGS_CORE = path.join(PLUGIN_DIR, "src", "settings", "settingsCore.mjs");
 const SETTINGS_PANE_TS = path.join(PLUGIN_DIR, "src", "settings", "settingsPane.ts");
+const CONNECTION_PANE_TS = path.join(PLUGIN_DIR, "src", "settings", "connectionPane.ts");
+const PANE_REFRESH_TS = path.join(PLUGIN_DIR, "src", "settings", "paneRefresh.ts");
+const PREFS_TS = path.join(PLUGIN_DIR, "src", "prefs", "prefs.ts");
 const CLOUD_PY = path.join(ROOT, "kbapp", "integrations", "cloud.py");
 const CONFIG_PY = path.join(ROOT, "kbapp", "core", "config.py");
 const SERVICE_CLIENT_CORE = path.join(PLUGIN_DIR, "src", "serviceClientCore.mjs");
@@ -379,17 +382,33 @@ test("every Fluent key this module renders exists in both bundles", async () => 
   }
 });
 
-test("no visible string escapes the registry in the TypeScript edge", () => {
-  const source = read(SETTINGS_PANE_TS);
-  // A quoted literal assigned to textContent is exactly the string that would
-  // stay English in a zh-CN build; `= ""` (clearing) is fine.
-  assert.doesNotMatch(source, /textContent\s*=\s*["'][^"']+["']/);
-  // Every t("…") call site names a key the registry knows about.
-  const literalKeys = [...source.matchAll(/\bt\(\s*"([^"]+)"/g)].map((match) => match[1]);
-  assert.ok(literalKeys.length > 0, "the pane's status keys are written out literally");
-  for (const key of literalKeys) {
-    assert.match(key, /^prefs-/, `${key} is not a prefs- key`);
+test("no visible string escapes the registry in the TypeScript edge", async () => {
+  const core = await loadCore();
+  const registry = new Set(core.settingsFluentKeys());
+  const en = parseFtl("en-US");
+  const zh = parseFtl("zh-CN");
+  // Every render-time key lives in one of these adapters. connectionPane.ts was
+  // missed by the first version of this test, so its four literals (the version
+  // line, the picker title, the unavailable note) were unanchored: a typo would
+  // have surfaced as a blank zh-CN row on a real machine.
+  for (const file of [SETTINGS_PANE_TS, CONNECTION_PANE_TS, PANE_REFRESH_TS]) {
+    const source = read(file);
+    const name = path.basename(file);
+    // A quoted literal assigned to textContent is exactly the string that would
+    // stay English in a zh-CN build; `= ""` (clearing) is fine.
+    assert.doesNotMatch(source, /textContent\s*=\s*["'][^"']+["']/, `${name} hardcodes a string`);
+    const literalKeys = [...source.matchAll(/\bt\(\s*"([^"]+)"/g)].map((match) => match[1]);
+    for (const key of literalKeys) {
+      assert.match(key, /^prefs-|^status-/, `${name}: ${key} is not a namespaced key`);
+      // A literal that is not in the registry is a key nobody checks.
+      const known = registry.has(key) || en.has(key) || zh.has(key);
+      assert.ok(known, `${name} renders ${key}, which no registry or bundle declares`);
+      assert.ok(en.has(key) && zh.has(key), `${name} renders ${key}, missing from a bundle`);
+    }
   }
+  // The cloud status keys specifically are literal, so this test has something
+  // to check even if a future edit moves them behind a table.
+  assert.ok([...read(SETTINGS_PANE_TS).matchAll(/\bt\(\s*"([^"]+)"/g)].length > 0);
   // The module must be reachable from the bundle entry, or it never ships.
   const entry = read(path.join(PLUGIN_DIR, "src", "index.ts"));
   assert.ok(entry.length > 0);
@@ -592,17 +611,84 @@ test("the key gate disables exactly the two controls that write a secret", () =>
   );
 });
 
-test("re-entering the pane re-reads instead of showing stale values", () => {
-  const source = read(SETTINGS_PANE_TS);
-  // `preferences.js` guards pane loading with a `loaded` flag, so onPaneLoad
-  // may run once per preferences window; without a re-entry refresh a user who
-  // changed the port or the key elsewhere would see the old values.
-  assert.match(source, /addEventListener\("showing"/);
-  const mount = source.slice(source.indexOf("export function mountCloud"));
-  const mountBody = mount.slice(0, mount.indexOf("\n}\n"));
-  assert.match(mountBody, /addEventListener\("showing"[\s\S]{0,120}?loadCloud\(doc\)/);
-  // And the listener must not be the only read: the first open still loads.
-  assert.match(mountBody, /void loadCloud\(doc\)/);
+test("the whole page refreshes from one snapshot, not one read per group", () => {
+  // Two groups landed in this pane from different directions and each brought
+  // its own read, so opening it issued six requests — including a pair of
+  // /api/version and a pair of /api/settings that were byte-identical and sent
+  // milliseconds apart. Worse, two writers of the same rows could disagree
+  // between their answers. src/settings/paneRefresh.ts now owns the one read.
+  const pane = read(PANE_REFRESH_TS);
+
+  // Exactly one GET /api/settings in the whole module.
+  const settingsGets = [...pane.matchAll(/serviceClient\(\)\.get\("\/api\/settings"\)/g)];
+  assert.equal(settingsGets.length, 1, "the page reads settings once, not once per group");
+
+  // Exactly one probe, and the diagnostics' extra reads hang off it.
+  const probes = [...pane.matchAll(/probeHealth\(\)/g)];
+  assert.equal(probes.length, 1, "the page probes the version once, not once per group");
+  assert.match(pane, /collectDiagnostics\(\)/);
+  assert.match(
+    pane,
+    /health\.state === "available"[\s\S]{0,200}?collectDiagnostics\(\)/,
+    "the extra diagnostic reads only run when the service answered as compatible",
+  );
+
+  // Neither group may read on its own any more.
+  const cloud = read(SETTINGS_PANE_TS);
+  const mountCloud = cloud.slice(cloud.indexOf("export function mountCloud"));
+  const mountCloudBody = mountCloud.slice(0, mountCloud.indexOf("\n}\n"));
+  assert.doesNotMatch(
+    mountCloudBody,
+    /loadCloud\(doc\)/,
+    "mountCloud must register buttons only: the pane's one read paints the form",
+  );
+  const connection = read(CONNECTION_PANE_TS);
+  const mountConnection = connection.slice(connection.indexOf("export function mountConnection"));
+  const mountConnectionBody = mountConnection.slice(0, mountConnection.indexOf("\n}\n"));
+  assert.doesNotMatch(
+    mountConnectionBody,
+    /loadConnection|collectDiagnostics/,
+    "mountConnection must register buttons only",
+  );
+
+  // One re-entry listener for the whole pane, not one per group.
+  for (const source of [cloud, connection]) {
+    assert.doesNotMatch(
+      source,
+      /addEventListener\("showing"/,
+      "a per-group `showing` listener would double every read on re-entry",
+    );
+  }
+  assert.match(pane, /addEventListener\("showing"[\s\S]{0,120}?refreshPane\(doc\)/);
+  // And the first open still reads.
+  assert.match(pane, /void refreshPane\(doc\)/);
+
+  // The manual refresh button drives the same single path.
+  const prefs = read(PREFS_TS);
+  assert.match(prefs, /refresh\(doc: Document\): void \{\s*void refreshPane\(doc\);/);
+  assert.doesNotMatch(
+    prefs,
+    /probeHealth\(\)/,
+    "the refresh button must not probe on its own: that was the second /api/version",
+  );
+
+  // The cache group (merged from main) must read through the same snapshot too.
+  // Its `refreshCache` kept its own GET for a while, which reintroduced exactly
+  // the duplication this module exists to remove — the assertion above only
+  // counted reads inside paneRefresh.ts and would not have noticed.
+  assert.doesNotMatch(
+    prefs,
+    /serviceClient\(\)\.get\("\/api\/settings"\)/,
+    "no group may keep its own settings read; refreshCache must delegate to refreshPane",
+  );
+  assert.match(
+    prefs,
+    /refreshCache\(doc: Document\): void \{[\s\S]{0,400}?void refreshPane\(doc\);/,
+    "refreshCache delegates to the shared refresh",
+  );
+  // ...and the cache row is actually painted by it.
+  assert.match(pane, /prefs-cache-current/);
+  assert.match(pane, /renderCache\(doc, snapshot\.settings\)/);
 });
 
 test("the probe budget is strictly below the plugin's request timeout", async () => {

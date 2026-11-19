@@ -295,6 +295,28 @@ export async function loadCloud(doc: Document): Promise<void> {
   }
 }
 
+/**
+ * Paint the cloud form from a view the shared refresh already fetched.
+ *
+ * `view === null` means the read failed; `error` is then the reason and the
+ * status row shows it instead of a form of blanks that would look like "every
+ * field is empty".
+ */
+export function renderCloud(doc: Document, view: SettingsView | null, error: unknown): void {
+  applyKeyGate(doc);
+  if (view === null) {
+    setStatus(doc, "loadFailed", { detail: detailOf(error) });
+    return;
+  }
+  fillForm(doc, view);
+  setStatus(doc, "saved");
+}
+
+/** Drop the form's DOM state when the pane closes. */
+export function resetCloud(doc: Document): void {
+  generations.delete(doc);
+}
+
 /** Save the form, then re-read so every row reflects what the service stored. */
 export async function saveCloud(doc: Document): Promise<void> {
   const generation = nextGeneration(doc);
@@ -413,20 +435,4 @@ export function mountCloud(doc: Document): void {
   if (mode) {
     mode.addEventListener("change", () => applyBudgetMode(doc));
   }
-  // Re-read whenever the pane is shown again.
-  //
-  // `preferences.js` guards pane loading with a `loaded` flag and signals
-  // re-entry with a `showing` event, so `onPaneLoad` may run only once per
-  // preferences window. Uncertain in enough Zotero builds that the cheap
-  // defence is worth it: a second read costs one local GET and only ever
-  // refreshes stale values. Edits in progress are safe because the generation
-  // counter makes a later user action win.
-  const root = doc.getElementById(IDS.group);
-  const paneRoot = root ? root.parentElement : null;
-  if (paneRoot && typeof paneRoot.addEventListener === "function") {
-    paneRoot.addEventListener("showing", () => {
-      void loadCloud(doc);
-    });
-  }
-  void loadCloud(doc);
 }

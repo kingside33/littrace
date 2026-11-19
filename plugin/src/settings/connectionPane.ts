@@ -15,10 +15,15 @@ import { savePayloadFrom, settingsViewFrom, versionViewFrom } from "./settingsCo
  * though they cannot store a cloud key (see settingsPane.applyKeyGate).
  *
  * All three reuse what the shell already has:
- *   - the version line re-reads the diagnostics the health refresh already
- *     collects, instead of probing /api/version a second time;
+ *   - the version line renders the diagnostics the pane's single refresh
+ *     already collected, instead of probing /api/version a second time;
  *   - the workbench and diagnostics buttons use the same host-link and
  *     status-dot entry points as the menus (U6), so the greying rules match.
+ *
+ * `loadConnection` takes the settings view and the diagnostic rows as
+ * arguments rather than fetching them: both groups read the same two things,
+ * and opening the pane used to issue six requests of which two pairs were
+ * byte-identical. src/settings/paneRefresh.ts owns the one read.
  */
 
 const IDS = {
@@ -47,30 +52,17 @@ function buttonOf(doc: Document, id: string): HTMLButtonElement | null {
   return node ? (node as unknown as HTMLButtonElement) : null;
 }
 
-/** Per-pane generation; a newer refresh invalidates older answers. */
-const generations = new WeakMap<Document, number>();
-
-function nextGeneration(doc: Document): number {
-  const value = (generations.get(doc) ?? 0) + 1;
-  generations.set(doc, value);
-  return value;
-}
-
-function stillCurrent(doc: Document, generation: number): boolean {
-  return generations.get(doc) === generation && doc.documentElement.isConnected;
-}
-
 /**
- * Paint the version line from one diagnostics snapshot.
+ * Paint the version line from the diagnostics rows.
  *
  * The facts come from rows the diagnostic popup already computes, so the pane
  * cannot disagree with the popup about what version is running. The relation
  * word is the diagnostic row's own Fluent key — no fourth vocabulary for the
  * same three states.
  *
- * Two separate lines rather than one concatenation: "服务 0.1.0" and
- * "要求 ≥ 0.1.0" are different facts, and a separator string that exists only
- * to join them reads as a third fact.
+ * Three separate spans rather than one concatenation: "服务 0.1.0" and
+ * "要求 ≥ 0.1.0" are different facts, and a separator that exists only to join
+ * them would read as a third one.
  */
 export function paintVersion(doc: Document, rows: unknown): void {
   const row = doc.getElementById(IDS.version);
@@ -103,33 +95,20 @@ export function paintVersion(doc: Document, rows: unknown): void {
   }
 }
 
-/** Read the directory and version rows. Never throws into the pane. */
-export async function loadConnection(doc: Document): Promise<void> {
-  const generation = nextGeneration(doc);
-  try {
-    const settings = await serviceClient().get("/api/settings");
-    if (!stillCurrent(doc, generation)) {
-      return;
-    }
+/** Paint the connection rows from one shared refresh. Never throws. */
+export function renderConnection(
+  doc: Document,
+  settings: unknown,
+  rows: unknown,
+): void {
+  if (settings !== undefined && settings !== null) {
     const view = settingsViewFrom(settings);
     const box = inputOf(doc, IDS.zoteroDir);
     if (box) {
       box.value = typeof view.fields.zotero_dir === "string" ? view.fields.zotero_dir : "";
     }
-  } catch (error) {
-    // The health row and the cloud status row both report service trouble;
-    // this row simply stays empty rather than repeating the same failure.
-    report(error, "读取数据目录");
   }
-  try {
-    const snapshot = await collectDiagnostics();
-    if (!stillCurrent(doc, generation)) {
-      return;
-    }
-    paintVersion(doc, snapshot.rows);
-  } catch (error) {
-    report(error, "读取服务版本");
-  }
+  paintVersion(doc, rows);
 }
 
 /** Save just the directory, leaving every other field as the service has it. */
@@ -151,7 +130,7 @@ export async function saveZoteroDir(doc: Document): Promise<void> {
  *
  * `window.FilePicker` is Zotero's Promise wrapper around nsIFilePicker
  * (chrome/content/zotero/modules/filePicker.mjs). The bare XPCOM object is the
- * wrong tool here: its `init()` takes a BrowsingContext, so passing a Window
+ * wrong tool here: its `init()` takes a browsing context, so passing a Window
  * raises NS_ERROR_INVALID_ARG. There is no other picker in this repository, so
  * this path is a real-machine acceptance item, not a tested one.
  *
@@ -210,7 +189,7 @@ export function openDiagnostics(doc: Document): void {
   }
 }
 
-/** Wire the connection group's new controls and run the first read. */
+/** Wire the connection group's new controls. The first read comes from the pane. */
 export function mountConnection(doc: Document): void {
   const choose = buttonOf(doc, IDS.choose);
   if (choose) {
@@ -218,18 +197,18 @@ export function mountConnection(doc: Document): void {
       void chooseZoteroDir(doc);
     });
   }
-  const bluebox = inputOf(doc, IDS.zoteroDir);
-  if (bluebox) {
-    // Saving on change keeps this row consistent with the rest of the pane,
-    // which has an explicit save for the group of fields a user edits together.
-    bluebox.addEventListener("change", () => {
+  const dirBox = inputOf(doc, IDS.zoteroDir);
+  if (dirBox) {
+    // Saving on change matches the cloud group's explicit save for the fields a
+    // user edits together, while this row has exactly one field.
+    dirBox.addEventListener("change", () => {
       void saveZoteroDir(doc);
     });
   }
   const workbench = buttonOf(doc, IDS.workbench);
   if (workbench) {
     workbench.addEventListener("click", () => openWorkbench());
-    // The menus grey the workbench entry when the service is unreachable: an
+    // The menus grey the workbench entry when the host cannot launch a link: an
     // error page in the browser is a worse failure than a disabled button.
     if (!canOpenHostLink()) {
       workbench.disabled = true;
@@ -239,5 +218,14 @@ export function mountConnection(doc: Document): void {
   if (diagnostics) {
     diagnostics.addEventListener("click", () => openDiagnostics(doc));
   }
-  void loadConnection(doc);
+}
+
+/** Re-read from the shared pane refresh (the `showing` path). */
+export async function refreshConnection(doc: Document): Promise<void> {
+  try {
+    const snapshot = await collectDiagnostics();
+    renderConnection(doc, undefined, snapshot.rows);
+  } catch (error) {
+    report(error, "读取服务版本");
+  }
 }
