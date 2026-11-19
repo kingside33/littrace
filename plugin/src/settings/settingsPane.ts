@@ -298,7 +298,7 @@ export async function loadCloud(doc: Document): Promise<void> {
 /** Save the form, then re-read so every row reflects what the service stored. */
 export async function saveCloud(doc: Document): Promise<void> {
   const generation = nextGeneration(doc);
-  const payload = savePayloadFrom(readForm(doc));
+  const payload = savePayloadFrom(readForm(doc), "cloud");
   if (!canProtectKey() && typeof payload.api_key === "string" && payload.api_key.length > 0) {
     // The one write that cannot succeed here. Refuse it locally with a readable
     // line instead of letting the service answer a opaque 500.

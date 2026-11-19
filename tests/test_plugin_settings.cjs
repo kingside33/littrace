@@ -243,13 +243,18 @@ test("the save payload never carries null", async () => {
 
 test("a normal save never touches the stored key", async () => {
   const core = await loadCore();
-  const payload = core.savePayloadFrom({
-    api_base: "https://api.example.org/v1",
-    model: "deepseek-chat",
-    api_key: "",
-    budget_mode: "unlimited",
-    cloud_enabled: true,
-  });
+  // The production path: the cloud form saves the cloud section, which is the
+  // only shape that must hold this exact set of keys.
+  const payload = core.savePayloadFrom(
+    {
+      api_base: "https://api.example.org/v1",
+      model: "deepseek-chat",
+      api_key: "",
+      budget_mode: "unlimited",
+      cloud_enabled: true,
+    },
+    "cloud",
+  );
   assert.equal(
     "api_key" in payload,
     false,
@@ -431,8 +436,104 @@ test("the cloud group writes through the shared client, never its own request", 
   assert.match(source, /import \{ serviceClient \} from "\.\.\/service-client"/);
   // Every write goes through settingsCore's payload builders rather than a
   // hand-built object, so the "never null" rule cannot be bypassed here.
-  assert.match(source, /savePayloadFrom\(readForm\(doc\)\)/);
+  assert.match(source, /savePayloadFrom\(readForm\(doc\),\s*"cloud"\)/);
   assert.match(source, /clearKeyPayload\(\)/);
+});
+
+test("each pane group saves only the fields it owns", async () => {
+  const core = await loadCore();
+  // Two groups write the same settings.json. Without a section scope the cloud
+  // form would send an empty zotero_dir and clear the directory the connection
+  // group manages — a silent cross-group write, and one the user could not
+  // explain from either form.
+  const cloudOnly = core.savePayloadFrom({ api_base: "https://x.test/v1", zotero_dir: "/mine" }, "cloud");
+  assert.equal("zotero_dir" in cloudOnly, false, "the cloud form must not write the directory");
+  assert.equal(cloudOnly.api_base, "https://x.test/v1");
+
+  const connectionOnly = core.savePayloadFrom({ api_base: "https://x.test/v1", zotero_dir: "/mine" }, "connection");
+  assert.deepEqual(connectionOnly, { zotero_dir: "/mine" });
+
+  // No section keeps the whole table, which is what a caller with the full form
+  // (and no second owner) wants.
+  const everything = core.savePayloadFrom({ api_base: "https://x.test/v1", zotero_dir: "/mine" });
+  assert.equal(everything.api_base, "https://x.test/v1");
+  assert.equal(everything.zotero_dir, "/mine");
+
+  // Every field names a section, so a scope can never silently match nothing.
+  for (const field of core.SETTINGS_FIELDS) {
+    assert.ok(
+      field.section === "cloud" || field.section === "connection",
+      `${field.key} has no usable section`,
+    );
+  }
+  assert.deepEqual(
+    core.fieldsForSection("connection").map((field) => field.key),
+    ["zotero_dir"],
+  );
+  assert.ok(core.fieldsForSection("cloud").length >= 8);
+
+  // Both writers scope themselves.
+  const cloudPane = read(SETTINGS_PANE_TS);
+  assert.match(cloudPane, /savePayloadFrom\(readForm\(doc\),\s*"cloud"\)/);
+  const connectionPane = read(
+    path.join(PLUGIN_DIR, "src", "settings", "connectionPane.ts"),
+  );
+  assert.match(connectionPane, /savePayloadFrom\(\{ zotero_dir: box\.value \},\s*"connection"\)/);
+});
+
+test("the version line reuses the diagnostics rows instead of probing twice", async () => {
+  const core = await loadCore();
+  const rows = [
+    { id: "service-version", tone: "ok", value: "0.1.0" },
+    { id: "requirement", tone: "ok", value: "0.1.0" },
+    { id: "version-relation", tone: "ok", valueKey: "status-diag-version-ok" },
+    { id: "port", tone: "ok", value: "8765" },
+  ];
+  const view = core.versionViewFrom(rows);
+  assert.equal(view.serviceVersion, "0.1.0");
+  assert.equal(view.minServiceVersion, "0.1.0");
+  // The relation word is the diagnostic popup's own key: a fourth vocabulary
+  // for the same three states would let the pane and the popup disagree.
+  assert.equal(view.relationKey, "status-diag-version-ok");
+  assert.equal(view.tone, "ok");
+
+  // A service that did not answer yields nulls, not invented text.
+  for (const input of [null, undefined, "text", [], [{ id: "service-version" }]]) {
+    const empty = core.versionViewFrom(input);
+    assert.equal(empty.serviceVersion, null);
+    assert.equal(empty.relationKey, null);
+  }
+
+  // The adapter reads the snapshot the health refresh already collects.
+  const source = read(path.join(PLUGIN_DIR, "src", "settings", "connectionPane.ts"));
+  assert.match(source, /collectDiagnostics\(\)/);
+  assert.match(source, /versionViewFrom\(/);
+});
+
+test("the connection group opens what the shell already opens, never its own path", () => {
+  const source = read(path.join(PLUGIN_DIR, "src", "settings", "connectionPane.ts"));
+  // Same host-link capability and launcher as the iframe bridge and the reader
+  // badges; a second copy would drift out of step with the greying rules.
+  assert.match(source, /import \{ canOpenHostLink, openHostLink \} from "\.\.\/tabs\/tabs"/);
+  assert.doesNotMatch(source, /Zotero\.launchURL\(/);
+  assert.doesNotMatch(source, /window\.open\(/);
+  // Diagnostics come from the status dot's own entry point.
+  assert.match(source, /import \{ openWindowDiagnostics \} from "\.\.\/status\/status"/);
+  // A missing diagnostics panel must say so rather than doing nothing.
+  assert.match(source, /prefs-open-unavailable/);
+  // The directory picker is Zotero's Promise wrapper, not raw nsIFilePicker:
+  // the bare object's init() takes a BrowsingContext and would throw here.
+  // Check the executable lines only — the comment above deliberately names the
+  // wrong API to explain why it is not used.
+  assert.match(source, /FilePicker/);
+  assert.match(source, /modeGetFolder/);
+  const codeLines = source
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*(?:\/\/|\*|\/\*)/.test(line))
+    .join("\n");
+  assert.doesNotMatch(codeLines, /nsIFilePicker/, "the bare XPCOM picker must not be used");
+  // A picker failure must not block the field.
+  assert.match(source, /data-picker-failed/);
 });
 
 test("only the key write is gated off Windows, not the whole group", () => {

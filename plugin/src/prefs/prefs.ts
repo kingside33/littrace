@@ -12,6 +12,7 @@ import { serviceClient } from "../service-client";
 import { probeHealth } from "../status/diagnostics";
 import { dotView } from "../status/statusCore.mjs";
 import { mountCloud } from "../settings/settingsPane";
+import { mountConnection } from "../settings/connectionPane";
 
 /**
  * The settings page (U5): preference access, the pane registration and the
@@ -216,6 +217,9 @@ export const prefsPane = {
     // src/settings/settingsPane.ts, so this file stays the pane's entry point
     // and never grows the read/write rules itself.
     mountCloud(doc);
+    // The connection group's extra rows (P3): version line, data directory,
+    // and the two jumps to the workbench and the diagnostics popup.
+    mountConnection(doc);
     void prefsPane.refresh(doc);
     void prefsPane.refreshCache(doc);
   },

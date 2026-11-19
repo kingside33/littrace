@@ -52,6 +52,40 @@
       <html:button id="littrace-prefs-refresh" data-l10n-id="littrace-prefs-refresh" />
     </hbox>
     <description data-l10n-id="littrace-prefs-diagnostics-hint" />
+
+    <!-- 版本行：内容来自已有诊断行（collectDiagnostics 的 service-version /
+         requirement / version-relation），不新开 HTTP 通道。 -->
+    <hbox align="center">
+      <label data-l10n-id="littrace-prefs-connection-version" />
+      <label id="littrace-prefs-version" data-l10n-id="littrace-status-diag-unavailable" />
+    </hbox>
+
+    <!-- Zotero 数据目录：服务侧 settings.json 的 zotero_dir，不是 Zotero pref。
+         控件不带 preference=；「选择…」用 Zotero 的 FilePicker（Promise 版
+         show()），失败时只报错，字段本身可手输。 -->
+    <hbox align="center">
+      <label
+        control="littrace-prefs-zotero-dir"
+        data-l10n-id="littrace-prefs-zotero-dir"
+      />
+      <html:input id="littrace-prefs-zotero-dir" type="text" size="42" />
+      <html:button
+        id="littrace-prefs-zotero-dir-choose"
+        data-l10n-id="littrace-prefs-zotero-dir-choose"
+      />
+    </hbox>
+    <description data-l10n-id="littrace-prefs-zotero-dir-desc" />
+
+    <hbox align="center">
+      <html:button
+        id="littrace-prefs-open-workbench"
+        data-l10n-id="littrace-prefs-open-workbench"
+      />
+      <html:button
+        id="littrace-prefs-open-diagnostics"
+        data-l10n-id="littrace-prefs-open-diagnostics"
+      />
+    </hbox>
   </groupbox>
 
   <!-- 云端 AI（服务侧设置，不是 Zotero pref）。
