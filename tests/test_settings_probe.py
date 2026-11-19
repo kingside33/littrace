@@ -473,3 +473,16 @@ def test_every_vocabulary_code_has_a_summary(code):
 
     text = _probe_summary(code, 500 if code == 'http' else None)
     assert isinstance(text, str) and text.strip()
+
+
+def test_no_two_vocabulary_codes_share_a_summary():
+    # The parametrised test above is satisfied by `_probe_summary`'s fallback:
+    # delete any row from its table and every code still returns a non-empty
+    # string. This is the assertion that actually notices — each code must say
+    # something *different*, or the user cannot tell the cases apart.
+    from kbapp.integrations.cloud import _probe_summary
+
+    summaries = {code: _probe_summary(code) for code in PROBE_CODES}
+    assert len(set(summaries.values())) == len(PROBE_CODES), (
+        'two probe codes render the same sentence: ' + json.dumps(summaries, ensure_ascii=False)
+    )
