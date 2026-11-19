@@ -9,9 +9,9 @@ import {
 } from "./prefsCore.mjs";
 import { serviceBaseUrlFromPrefs } from "./serviceOrigin";
 import { serviceClient } from "../service-client";
-import { probeHealth } from "../status/diagnostics";
-import { dotView } from "../status/statusCore.mjs";
 import { mountCloud } from "../settings/settingsPane";
+import { mountConnection } from "../settings/connectionPane";
+import { mountPane, refreshPane } from "../settings/paneRefresh";
 
 /**
  * The settings page (U5): preference access, the pane registration and the
@@ -55,10 +55,6 @@ interface CacheInfo {
 interface SettingsPayload {
   cache_dir?: string;
   cache?: CacheInfo;
-}
-
-async function fetchSettings(): Promise<SettingsPayload> {
-  return (await serviceClient().get("/api/settings")) as SettingsPayload;
 }
 
 async function postSettings(values: {
@@ -206,18 +202,19 @@ export const prefsPane = {
     if (refresh) {
       refresh.addEventListener("click", () => prefsPane.refresh(doc));
     }
-    // The cache row: read the current server-side cache on load, and forward a
-    // typed directory when the user applies it (issue #61).
+    // The cache row keeps its own save button; its read comes from the page's
+    // single snapshot (src/settings/paneRefresh.ts), so the page cannot show a
+    // cache path and a cloud form from two different moments.
     const saveCache = doc.getElementById("littrace-prefs-cache-save");
     if (saveCache) {
       saveCache.addEventListener("click", () => prefsPane.saveCacheDir(doc));
     }
-    // The cloud AI group (P2): its own buttons and its first read live in
-    // src/settings/settingsPane.ts, so this file stays the pane's entry point
-    // and never grows the read/write rules itself.
+    // Both server-side groups (P2 cloud, P3 connection) register their buttons
+    // here and own no read of their own: paneRefresh.ts issues the page's single
+    // set of requests. See that module for what used to be six requests.
     mountCloud(doc);
-    void prefsPane.refresh(doc);
-    void prefsPane.refreshCache(doc);
+    mountConnection(doc);
+    mountPane(doc);
   },
 
   /**
@@ -228,38 +225,10 @@ export const prefsPane = {
    * stale path.
    */
   refreshCache(doc: Document): void {
-    const row = doc.getElementById("littrace-prefs-cache-current");
-    if (!row) {
-      return;
-    }
-    row.setAttribute("data-l10n-id", "littrace-prefs-cache-checking");
-    void (async () => {
-      try {
-        const settings = await fetchSettings();
-        const cache = settings.cache as CacheInfo | undefined;
-        if (!row.isConnected) {
-          return;
-        }
-        if (!cache) {
-          row.textContent = t("prefs-cache-unavailable");
-          return;
-        }
-        row.textContent = `${cache.path}(${t("prefs-cache-count", {
-          args: { files: String(cache.files), size: formatBytes(cache.bytes) },
-        })})`;
-        const hint = doc.getElementById("littrace-prefs-cache-default");
-        if (hint) {
-          hint.textContent = t("prefs-cache-default", {
-            args: { path: cache.default_path },
-          });
-        }
-      } catch (error) {
-        if (row.isConnected) {
-          row.textContent = t("prefs-cache-unavailable");
-        }
-        report(error, "读取缓存信息");
-      }
-    })();
+    // One read for the page: paneRefresh paints the cache row from the same
+    // snapshot as the cloud form and the version line. This used to be a
+    // second GET /api/settings milliseconds after the first.
+    void refreshPane(doc);
   },
 
   /**
@@ -303,7 +272,7 @@ export const prefsPane = {
             },
           });
         }
-        prefsPane.refreshCache(doc);
+        void refreshPane(doc);
       } catch (error) {
         if (result) {
           result.hidden = false;
@@ -316,24 +285,15 @@ export const prefsPane = {
     })();
   },
 
+  /**
+   * The manual refresh button.
+   *
+   * One path for the whole page: the health row, the version line and both
+   * forms come from one snapshot. The button used to refresh only the health
+   * label, which meant a user pressing 「刷新」 after starting the service saw
+   * "online" next to a form that had failed to load seconds earlier.
+   */
   refresh(doc: Document): void {
-    const row = doc.getElementById("littrace-prefs-health");
-    if (!row) {
-      return;
-    }
-    row.textContent = t(HEALTH_LABEL_KEYS.checking);
-    void (async () => {
-      let state = "offline";
-      try {
-        const health = await probeHealth();
-        state = dotView(health).state;
-      } catch (error) {
-        report(error, "健康检查");
-      }
-      if (!row.isConnected) {
-        return;
-      }
-      row.textContent = t(HEALTH_LABEL_KEYS[state] ?? HEALTH_LABEL_KEYS.offline);
-    })();
+    void refreshPane(doc);
   },
 };

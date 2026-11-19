@@ -68,6 +68,7 @@ const LIMITED_ONLY = [IDS.budget, IDS.inputPrice, IDS.outputPrice];
 /** Lifecycle strings the status row can show. */
 const STATUS_ROLES = {
   loading: "prefs-cloud-loading",
+  loaded: "prefs-cloud-loaded",
   loadFailed: "prefs-cloud-load-failed",
   saving: "prefs-cloud-saving",
   saved: "prefs-cloud-saved",
@@ -285,7 +286,7 @@ export async function loadCloud(doc: Document): Promise<void> {
       return;
     }
     fillForm(doc, settingsViewFrom(data));
-    setStatus(doc, "saved");
+    setStatus(doc, "loaded");
   } catch (error) {
     if (!stillCurrent(doc, generation)) {
       return;
@@ -295,10 +296,34 @@ export async function loadCloud(doc: Document): Promise<void> {
   }
 }
 
+/**
+ * Paint the cloud form from a view the shared refresh already fetched.
+ *
+ * `view === null` means the read failed; `error` is then the reason and the
+ * status row shows it instead of a form of blanks that would look like "every
+ * field is empty".
+ */
+export function renderCloud(doc: Document, view: SettingsView | null, error: unknown): void {
+  applyKeyGate(doc);
+  if (view === null) {
+    setStatus(doc, "loadFailed", { detail: detailOf(error) });
+    return;
+  }
+  fillForm(doc, view);
+  // A load is not a save: this row must not claim 「设置已保存」 for an action
+  // the user never took.
+  setStatus(doc, "loaded");
+}
+
+/** Drop the form's DOM state when the pane closes. */
+export function resetCloud(doc: Document): void {
+  generations.delete(doc);
+}
+
 /** Save the form, then re-read so every row reflects what the service stored. */
 export async function saveCloud(doc: Document): Promise<void> {
   const generation = nextGeneration(doc);
-  const payload = savePayloadFrom(readForm(doc));
+  const payload = savePayloadFrom(readForm(doc), "cloud");
   if (!canProtectKey() && typeof payload.api_key === "string" && payload.api_key.length > 0) {
     // The one write that cannot succeed here. Refuse it locally with a readable
     // line instead of letting the service answer a opaque 500.
@@ -413,20 +438,4 @@ export function mountCloud(doc: Document): void {
   if (mode) {
     mode.addEventListener("change", () => applyBudgetMode(doc));
   }
-  // Re-read whenever the pane is shown again.
-  //
-  // `preferences.js` guards pane loading with a `loaded` flag and signals
-  // re-entry with a `showing` event, so `onPaneLoad` may run only once per
-  // preferences window. Uncertain in enough Zotero builds that the cheap
-  // defence is worth it: a second read costs one local GET and only ever
-  // refreshes stale values. Edits in progress are safe because the generation
-  // counter makes a later user action win.
-  const root = doc.getElementById(IDS.group);
-  const paneRoot = root ? root.parentElement : null;
-  if (paneRoot && typeof paneRoot.addEventListener === "function") {
-    paneRoot.addEventListener("showing", () => {
-      void loadCloud(doc);
-    });
-  }
-  void loadCloud(doc);
 }

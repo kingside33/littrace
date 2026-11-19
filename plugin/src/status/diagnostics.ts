@@ -48,14 +48,31 @@ async function optionalGet(path: string): Promise<unknown> {
  * `health` is never null: a throwing probe is normalised to the offline
  * verdict, so the caller cannot accidentally render "no row" for a service
  * that could not be reached.
+ *
+ * `options.health` lets a caller that has *already* probed hand its verdict in
+ * instead of probing again. The settings page does this: it probes once for its
+ * health row, and a second probe here would be the same request twice and a
+ * second chance for the two rows to describe different moments.
+ *
+ * Rows are built **unconditionally** — `diagnosticRows` is pure and reports
+ * 「版本过旧」/「不可用」 from the verdict alone. Only the two extra GETs are
+ * gated on the service answering as compatible. Gating the row builder too was
+ * a bug: 「版本过旧」 is precisely the case the version line exists for, and it
+ * left the line blank exactly then.
  */
-export async function collectDiagnostics(): Promise<DiagnosticSnapshot> {
+export async function collectDiagnostics(
+  options: { health?: HealthVerdict } = {},
+): Promise<DiagnosticSnapshot> {
   const baseUrl = serviceBaseUrlFromPrefs();
   let health: HealthVerdict;
-  try {
-    health = await probeHealth();
-  } catch {
-    health = offlineHealth();
+  if (options.health) {
+    health = options.health;
+  } else {
+    try {
+      health = await probeHealth();
+    } catch {
+      health = offlineHealth();
+    }
   }
   const reachable = health.state === "available";
   const [status, models] = reachable
