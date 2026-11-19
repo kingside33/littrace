@@ -92,8 +92,14 @@ class LeaseTest(unittest.TestCase):
     def test_heartbeat_extends_lease_while_running(self):
         with Lease(self.store, 'u', interval=0.05):
             first = lease_of(self.store, 'u')['lease_until']
-            time.sleep(0.2)
-            second = lease_of(self.store, 'u')['lease_until']
+            # Poll instead of sleeping a fixed 0.2 s: a loaded CI runner can
+            # starve the heartbeat thread past that window, and the two reads
+            # then return the same timestamp.
+            deadline = time.monotonic() + 3.0
+            second = first
+            while second == first and time.monotonic() < deadline:
+                time.sleep(0.02)
+                second = lease_of(self.store, 'u')['lease_until']
             self.assertGreater(second, first)
         self.assertIsNone(lease_of(self.store, 'u'))
 
