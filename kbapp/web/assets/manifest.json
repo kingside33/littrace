@@ -177,7 +177,14 @@
    "searchPage",
    "paperHitsHTML",
    "retrievalSummary",
-   "renderResults"
+   "renderResults",
+   "evidenceSelection",
+   "evidenceToMarkdown",
+   "toggleEvidence",
+   "clearEvidenceSelection",
+   "updateEvidenceToolbar",
+   "copyEvidenceMarkdown",
+   "resolveEvidenceLink"
   ],
   "approvals": [
    "approvalsPage"
