@@ -46,10 +46,12 @@ git diff origin/main...HEAD --stat
 
 ## 架构决策纪律
 
-重要决策(机制选型、契约、流程、验收方法)在实现 PR 里以 DecisionRecord
-形式上报(标题 / 背景 / 决策 / 备选 / 后果),由每批次的 ADR PR 写入
-`docs/adr/NNNN-<slug>.md`:编号递增、定稿不改写、修订开新 ADR 引用旧号;
-索引在 `docs/adr/README.md`。改动落入已有 ADR 覆盖的领域,动手前先读那几份。
+**新功能,或对既有功能的任何修改,一律撰写或修订 ADR:对应实现 PR 必须携带
+DecisionRecord,不按「决策是否重要」裁量。** 机制选型、契约、流程、验收方法
+等决策以 DecisionRecord 形式上报(标题 / 背景 / 决策 / 备选 / 后果),由每
+批次的 ADR PR 写入 `docs/adr/NNNN-<slug>.md`:编号递增、定稿不改写、修订开
+新 ADR 引用旧号;索引在 `docs/adr/README.md`。改动落入已有 ADR 覆盖的领域,
+动手前先读那几份。
 
 ## 协作流程
 
