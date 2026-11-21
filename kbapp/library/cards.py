@@ -46,7 +46,7 @@ def validate_title_rules(value, name='KB_TITLE_RULES'):
         ids = [str(d) for d in dirs]
         for d in ids:
             if d not in DIR_ORDER:
-                raise ValueError(f'{name} 第 {index} 条的方向编号 {json.dumps(d, ensure_ascii=False)} 不在方向表中')
+                raise ValueError(f'{name} 第 {index} 条 ({json.dumps(pattern, ensure_ascii=False)}, {json.dumps(dirs, ensure_ascii=False)}) 的方向编号 {json.dumps(d, ensure_ascii=False)} 不在方向表中')
         rules.append((pattern, ids))
     return rules
 
@@ -55,7 +55,14 @@ def load_title_rules():
     """题名→方向规则三态：未设置 KB_TITLE_RULES 用内置词表，显式 [] 关闭题名推断，其余校验后生效。"""
     value = env_json('KB_TITLE_RULES', None)
     if value is None:
-        return validate_title_rules(_DEFAULT_TITLE_RULES)
+        try:
+            return validate_title_rules(_DEFAULT_TITLE_RULES)
+        except ValueError as exc:
+            # 内置词表对生效方向表 fail-fast(DR-1)时，指明这是默认值而非用户配置，并给出出路。
+            raise ValueError(
+                f'内置题名词表(未设置 KB_TITLE_RULES 时的默认值)不在生效方向表内: {exc}; '
+                '处理方式: 设置 KB_TITLE_RULES 显式给出题名规则, 或让 KB_DIRECTIONS 保留内置词表引用的方向编号'
+            ) from exc
     return validate_title_rules(value)
 
 

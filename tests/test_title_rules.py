@@ -68,6 +68,8 @@ class TitleRuleValidation(unittest.TestCase):
             cards.validate_title_rules([['冷原子', ['99']]])
         message = str(ctx.exception)
         self.assertIn('第 1 条', message)
+        # 错误信息同时指出该条规则的内容（正则与目标方向）与坏编号
+        self.assertIn('("冷原子", ["99"])', message)
         self.assertIn('"99"', message)
         self.assertIn('不在方向表', message)
 
@@ -78,8 +80,26 @@ class TitleRuleValidation(unittest.TestCase):
         self.assertEqual(cards.validate_title_rules([['quantum', ['A1']]]), [('quantum', ['A1'])])
         with self.assertRaises(ValueError) as ctx:
             cards.validate_title_rules([['quantum', ['02']]])
-        self.assertIn('"02"', str(ctx.exception))
-        self.assertIn('不在方向表', str(ctx.exception))
+        message = str(ctx.exception)
+        self.assertIn('("quantum", ["02"])', message)
+        self.assertIn('"02"', message)
+        self.assertIn('不在方向表', message)
+
+    def test_builtin_vocabulary_fail_fast_when_builtin_ids_removed(self):
+        # DR-1 锚定：KB_DIRECTIONS 改掉内置编号且未设置 KB_TITLE_RULES 时，
+        # 内置词表过同一校验，加载即 fail-fast；报错指明默认值身份并给出两条出路。
+        saved = cards.DIR_ORDER
+        cards.DIR_ORDER = ['A1', 'A2', '90']
+        self.addCleanup(setattr, cards, 'DIR_ORDER', saved)
+        with self.assertRaises(ValueError) as ctx:
+            cards.load_title_rules()
+        message = str(ctx.exception)
+        self.assertIn('内置题名词表', message)
+        self.assertIn('未设置 KB_TITLE_RULES 时的默认值', message)
+        self.assertIn('"04"', message)
+        self.assertIn('不在方向表', message)
+        self.assertIn('设置 KB_TITLE_RULES', message)
+        self.assertIn('KB_DIRECTIONS', message)
 
     def test_custom_rules_first_match_for_cards_and_union_for_lineage(self):
         cards.KEYWORD_RULES = [('路径', ['02']), ('规划', ['06'])]
@@ -129,12 +149,36 @@ class RuleChangeCacheInvalidation(unittest.TestCase):
         cards.KEYWORD_RULES = [('量子', ['02'])]
         self.assertEqual(graph.graph_papers(self.store)['cold']['directions'], ['02'])
 
-        # 磁盘缓存路径：丢弃内存缓存，从磁盘旧 records 恢复也必须按新规则重新归类
+        # 磁盘缓存路径：在同一目录新建第二个 Store（等价于进程重启复用），
+        # 从磁盘旧 records 恢复也必须按新指纹重新归类
         cards.KEYWORD_RULES = [('冷原子', ['01'])]
-        self.store._graph_catalog = None
         prior = read_json(path, {})
         self.assertTrue(prior.get('records'))
+        restart = Store(self.temp.name)
+        self.assertEqual(graph.graph_papers(restart)['cold']['directions'], ['01'])
+
+    def test_rule_change_to_non_matching_rule_clears_inferred_directions(self):
+        # 旧规则曾由题名推断出方向；换成不命中该题名的新规则后，推断结果必须清空，
+        # 且不再有 direction_basis（issue #100：相同论文按新规则重新得到展示结果）。
+        cards.KEYWORD_RULES = [('冷原子', ['01'])]
         self.assertEqual(graph.graph_papers(self.store)['cold']['directions'], ['01'])
+        self.assertEqual(graph.graph_papers(self.store)['cold']['direction_basis'], 'title_keywords')
+        path = self.store.paths.cache / 'graph-taxonomy.json'
+        self.assertTrue(path.exists())
+
+        # 内存路径：同一 Store 换成不命中的规则 → directions 清空、无 direction_basis
+        cards.KEYWORD_RULES = [('湍流', ['09'])]
+        paper = graph.graph_papers(self.store)['cold']
+        self.assertEqual(paper['directions'], [])
+        self.assertNotIn('direction_basis', paper)
+
+        # 磁盘路径：重启复用（第二个 Store 从磁盘 records 恢复）同样不命中旧结果
+        prior = read_json(path, {})
+        self.assertTrue(prior.get('records'))
+        restart = Store(self.temp.name)
+        paper = graph.graph_papers(restart)['cold']
+        self.assertEqual(paper['directions'], [])
+        self.assertNotIn('direction_basis', paper)
 
     def test_lineage_direction_basis_refreshed_after_rule_change(self):
         cards.KEYWORD_RULES = [('冷原子', ['01'])]
