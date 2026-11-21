@@ -279,7 +279,10 @@ def test_guard_flags_cla_assistant_signing_curl(tmp_path: Path) -> None:
     violations = scan_workflows(tmp_path)
     assert violations, "cla-assistant.io call was not flagged"
     assert any(item.rule == "cla_assistant" for item in violations)
-    assert any("cla-assistant.io" in item.text for item in violations)
+    # Exact-line equality, not a URL substring match: CodeQL flags
+    # `"host" in url` as incomplete URL sanitization, and the injected line is
+    # known verbatim, so a substring check buys nothing here.
+    assert any(item.text == "curl https://cla-assistant.io/sign" for item in violations)
 
 
 def test_guard_flags_cla_env_key(tmp_path: Path) -> None:
