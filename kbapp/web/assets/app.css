@@ -148,6 +148,7 @@ select {max-width:260px}
 .result {background:var(--white);border:1px solid var(--border);padding:22px 24px;}
 .result h3 {font:18px/1.5 var(--sans);margin:10px 0}
 .result .meta {font-size:10px;color:var(--muted)}
+.evidence-pick {display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);cursor:pointer;margin-right:10px}
 .excerpt {font-size:12px;line-height:1.95;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere;padding-left:13px;border-left:2px solid #d5ddca;margin:14px 0}
 .result-footer {display:flex;gap:14px;align-items:center;font-size:11px}
 .result-footer button {margin-left:auto}
