@@ -366,8 +366,10 @@ node --test tests/test_*.cjs
 ### Independent review pass
 
 Every pull request gets one full review by an independent session — one that
-did not implement the change. The reviewer session reviews only and does not
-write code: no commits, no pushes, no resolving of review threads.
+did not implement the change. The reviewer session may be an AI session,
+including a subagent session dispatched by automated orchestration. The
+reviewer session reviews only and does not write code: no commits, no
+pushes, no resolving of review threads.
 
 Before reviewing, verify that the local worktree head matches the
 `headRefOid` reported by `gh pr view --json headRefOid`; stop immediately if
