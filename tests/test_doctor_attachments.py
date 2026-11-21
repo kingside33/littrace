@@ -302,6 +302,25 @@ class DoctorAttachments(unittest.TestCase):
             doctor_attachments.main(['--bogus'])
         self.assertEqual(caught.exception.code, 2)
 
+    # 库损坏/被占用（注入 ro_connect 抛 sqlite3.OperationalError）→ 不带 traceback，
+    # 按「检查无法执行」契约给中文指引并退出 2，不输出 JSON。
+    def test_sqlite_error_injection_reports_unexecutable_and_exits_2(self):
+        build_zotero_db(str(self.zdir), [], [])
+        for message in ('database disk image is malformed', 'database is locked'):
+            with self.subTest(message=message):
+                with mock.patch.object(doctor_attachments, 'ro_connect',
+                                       side_effect=sqlite3.OperationalError(message)):
+                    out = io.StringIO()
+                    err = io.StringIO()
+                    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                        code = doctor_attachments.main(['--zotero-dir', str(self.zdir),
+                                                        '--base', str(self.base), '--json'])
+                self.assertEqual(code, 2)
+                self.assertEqual(out.getvalue(), '')
+                self.assertIn('zotero.sqlite', err.getvalue())
+                self.assertIn('损坏或被占用', err.getvalue())
+                self.assertIn('Zotero', err.getvalue())
+
     # CLI 分派守卫：doctor attachments 走早退分支，绝不初始化可写 AppContext（需求 4 点名位置）。
     def test_cli_dispatch_reaches_tool_without_appcontext_and_writes_nothing(self):
         build_zotero_db(str(self.zdir),

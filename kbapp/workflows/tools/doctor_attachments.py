@@ -14,6 +14,7 @@ pdf_missing 与 pdf_readable，两个事实都保留。
 import argparse
 import json
 import os
+import sqlite3
 import stat
 import sys
 from kbapp.core.io import read_json
@@ -97,7 +98,8 @@ def resolve_zotero_dir(explicit, paths):
 
 
 def collect_report(zotero_dir, base_dir):
-    """只读扫描库与本地文件，返回报告 dict；发现不了 zotero.sqlite 抛 FileNotFoundError。"""
+    """只读扫描库与本地文件，返回报告 dict；发现不了 zotero.sqlite 抛 FileNotFoundError，
+    库损坏或被占用时由 ro_connect 抛 sqlite3.Error，均由 main 映射为退出码 2。"""
     db_path = os.path.join(zotero_dir, 'zotero.sqlite')
     if not os.path.exists(db_path):
         raise FileNotFoundError(db_path)
@@ -203,6 +205,10 @@ def main(argv=None):
     except FileNotFoundError:
         print(f"找不到 {os.path.basename(zdir)}/zotero.sqlite（解析到的目录：{zdir}）。"
               '请确认 Zotero 数据目录后再运行。', file=sys.stderr)
+        return 2
+    except sqlite3.Error:
+        print(f"无法读取 {os.path.basename(zdir)}/zotero.sqlite，库文件可能损坏或被占用。"
+              '请关闭 Zotero（必要时校验库完整性）后再运行。', file=sys.stderr)
         return 2
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
