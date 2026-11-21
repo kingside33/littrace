@@ -78,6 +78,12 @@ class Attachments(unittest.TestCase):
         ]}])
         self.add_document('doc-x', 'q', 'X', extra, '2026-01-01T00:00:00+08:00')
         self.add_document('doc-y', 'q', 'Y', self.pdf_b, '2026-01-01T00:00:00+08:00')
+        with self.store.db() as db:
+            # 建 (paper_id,updated) 索引，让 SQLite 反向扫描索引就满足 ORDER BY，
+            # 此时同秒并列按索引内的 rowid 倒序返回（doc-y 在前）。若查询只写
+            # updated DESC，结果会依赖这次扫描顺序；显式 rowid ASC 才与索引形状
+            # 无关。这样能把“表扫描的偶然顺序”与确定性契约区分开。
+            db.execute('CREATE INDEX documents_test_paper_updated ON documents(paper_id,updated)')
         self.assertEqual(attachments_of(self.store, 'q')['primary_document'], 'doc-x')
         self.set_document_updated('doc-y', '2026-01-01T00:00:01+08:00')
         self.assertEqual(attachments_of(self.store, 'q')['primary_document'], 'doc-y')
