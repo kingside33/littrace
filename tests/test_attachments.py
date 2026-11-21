@@ -37,6 +37,60 @@ class Attachments(unittest.TestCase):
                 db.execute('INSERT INTO document_pages VALUES(?,?,?,?,?,?,?,?)', (doc_id, 1, 'NATIVE_TEXT', 'complete', text, '', '{}', now()))
                 db.execute('INSERT INTO document_chunks VALUES(?,?,?,?,?,?)', (doc_id + '-c', doc_id, 1, None, text, json.dumps({'section': 'Method', 'parser_version': 2, 'origin': 'paper', 'quality': 'complete'})))
 
+    def set_document_updated(self, document_id, updated):
+        with self.store.db() as db:
+            db.execute('UPDATE documents SET updated=? WHERE id=?', (updated, document_id))
+
+    def add_document(self, document_id, paper_id, key, path, updated):
+        with self.store.db() as db:
+            db.execute('INSERT INTO documents VALUES(?,?,?,?,?,?,?,?)',
+                       (document_id, paper_id, key, file_hash(path), str(path), 1, '{}', updated))
+
+    def test_default_active_prefers_primary_attachment_over_newest_document(self):
+        # 回归 #79：document.updated 只精确到秒，跨秒时旧实现会把后登记的补充
+        # 材料当成默认证据版本。这里把 doc-b 显式标成更晚更新，默认仍须是主附件。
+        self.set_document_updated('doc-b', '2099-01-01T00:00:00+08:00')
+        listing = attachments_of(self.store, 'p')
+        self.assertEqual(listing['primary_document'], 'doc-a')
+        active = {i['document_id']: i['active'] for i in listing['items'] if i.get('document_id')}
+        self.assertEqual(active, {'doc-a': True, 'doc-b': False})
+
+    def test_default_active_follows_primary_attachment_key(self):
+        self.store.patch_paper('p', {'primary_attachment_key': 'B'})
+        self.set_document_updated('doc-a', '2099-01-01T00:00:00+08:00')
+        listing = attachments_of(self.store, 'p')
+        self.assertEqual(listing['primary_document'], 'doc-b')
+        self.assertTrue(next(i for i in listing['items'] if i.get('document_id') == 'doc-b')['active'])
+
+    def test_default_active_follows_paper_pdf_path(self):
+        self.store.patch_paper('p', {'pdf': str(self.pdf_b)})
+        self.set_document_updated('doc-a', '2099-01-01T00:00:00+08:00')
+        listing = attachments_of(self.store, 'p')
+        self.assertEqual(listing['primary_document'], 'doc-b')
+        self.assertTrue(next(i for i in listing['items'] if i.get('document_id') == 'doc-b')['active'])
+
+    def test_default_active_without_primary_attachment_is_order_stable(self):
+        extra = Path(self.temp.name) / 'appendix.pdf'
+        extra.write_bytes(b'%PDF appendix')
+        self.store.put_papers([{'id': 'q', 'title': 'Extra', 'kind': 'library', 'attachments': [
+            {'key': 'X', 'abs_path': str(extra), 'exists': True, 'content_type': 'application/pdf'},
+            {'key': 'Y', 'abs_path': str(self.pdf_b), 'exists': True, 'content_type': 'application/pdf'},
+        ]}])
+        self.add_document('doc-x', 'q', 'X', extra, '2026-01-01T00:00:00+08:00')
+        self.add_document('doc-y', 'q', 'Y', self.pdf_b, '2026-01-01T00:00:00+08:00')
+        self.assertEqual(attachments_of(self.store, 'q')['primary_document'], 'doc-x')
+        self.set_document_updated('doc-y', '2026-01-01T00:00:01+08:00')
+        self.assertEqual(attachments_of(self.store, 'q')['primary_document'], 'doc-y')
+
+    def test_default_active_ignores_missing_files(self):
+        os.remove(self.pdf_b)
+        listing = attachments_of(self.store, 'p')
+        self.assertEqual(listing['primary_document'], 'doc-a')
+        self.assertEqual({i['document_id']: i['status'] for i in listing['items'] if i.get('document_id')},
+                         {'doc-a': 'available', 'doc-b': 'missing'})
+        os.remove(self.pdf_a)
+        self.assertIsNone(attachments_of(self.store, 'p')['primary_document'])
+
     def test_roles_and_missing_attachment(self):
         self.assertEqual(classify_attachment({'exists': True, 'abs_path': 'x/supplement.pdf', 'content_type': 'application/pdf'}), ('supplementary', 'available'))
         self.assertEqual(classify_attachment({'exists': True, 'abs_path': 'x/author-manuscript.pdf', 'content_type': 'application/pdf'}), ('author_manuscript', 'available'))
