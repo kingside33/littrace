@@ -48,26 +48,35 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh label create lessons-review --color fbca04 --description "错题本到期条目周报" --force
 
-      # 有到期条目就开或更新同一个 issue;没有就关掉旧的。去重靠标签而不是
-      # 标题搜索:标题可以被改,标签不会。
-      - name: Open, update, or close the review issue
+      # 有到期条目就开或更新最早的一个 issue,多余的关掉;没有就全部关闭。
+      # 去重靠标签而不是标题搜索:标题可以被改,标签不会。遍历所有带标签的
+      # open issue 而不是只取最新一个,人工误建的带标签 issue 不会永久滞留。
+      - name: Open, update, or close the review issues
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           BODY="$RUNNER_TEMP/lessons-report.md"
-          OPEN=$(gh issue list --label lessons-review --state open --limit 1 --json number --jq '.[0].number // empty')
+          OPEN=$(gh issue list --label lessons-review --state open --json number --jq 'map(.number) | sort | .[]')
           if grep -q 'no-lessons-due' "$BODY"; then
-            if [ -n "$OPEN" ]; then
-              gh issue close "$OPEN" --comment "本轮没有到期条目,自动关闭。"
-            else
+            if [ -z "$OPEN" ]; then
               echo "No lessons are due."
+            else
+              for n in $OPEN; do
+                gh issue close "$n" --comment "本轮没有到期条目,自动关闭。"
+              done
             fi
             exit 0
           fi
-          if [ -n "$OPEN" ]; then
-            gh issue edit "$OPEN" --body-file "$BODY"
-            echo "Updated issue #$OPEN."
-          else
+          FIRST=$(printf '%s\n' "$OPEN" | head -n 1)
+          for n in $OPEN; do
+            if [ "$n" = "$FIRST" ]; then
+              gh issue edit "$n" --body-file "$BODY"
+              echo "Updated issue #$n."
+            else
+              gh issue close "$n" --comment "与 #$FIRST 重复,保留最早的一个。"
+            fi
+          done
+          if [ -z "$OPEN" ]; then
             gh issue create --title "错题本:有到期条目待升级或删除" --body-file "$BODY" --label lessons-review
           fi

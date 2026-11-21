@@ -101,11 +101,24 @@ class Report(unittest.TestCase):
         older = self.body(GOOD.replace('2026-11-18', '2026-09-20'))
         self.assertIn('| L-001 | 一条规则 | 2026-09-20 | #1 |', older)
 
-    def test_table_cells_escape_pipes_and_newlines(self):
-        text = DUE.replace('一条规则', '甲|乙').replace('为什么: 原因', '为什么: 第一行\n  第二行')
-        body = self.body(text)
-        self.assertIn('甲\\|乙', body)
+    def test_table_cell_escapes_pipe_alone(self):
+        body = self.body(DUE.replace('一条规则', '甲|乙'))
+        self.assertIn(r'甲\|乙', body)
         self.assertNotIn('甲|乙', body)
+
+    def test_table_cell_escapes_backslash_before_pipe(self):
+        # GFM 里 \\ 是字面反斜杠、\| 是字面竖线:先转 \ 再转 |,
+        # 否则含 \| 的标题会把单元格截断。
+        body = self.body(DUE.replace('一条规则', r'甲\|乙'))
+        self.assertIn(r'甲\\\|乙', body)
+        self.assertNotIn(r'甲\|乙', body)
+
+    def test_table_cell_joins_multiline_evidence(self):
+        # 多行负载必须放进会渲染的「证据」列:放在「为什么」里删掉折叠逻辑
+        # 测试照样全绿,不算锚定。
+        text = DUE.replace('证据: #1', '证据: #1,\n  #2')
+        body = self.body(text)
+        self.assertIn('| #1, #2 |', body)
 
     def test_cli_report_is_markdown(self):
         self.write(DUE)

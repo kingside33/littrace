@@ -268,8 +268,12 @@ def is_stale(entry, today):
 
 
 def table_cell(value):
-    """把多行字段压成一行并转义竖线,否则会撑破 Markdown 表格。"""
-    return ' '.join(str(value).split()).replace('|', '\\|')
+    r"""把多行字段压成一行并转义反斜杠与竖线,否则会撑破 Markdown 表格。
+
+    先转义反斜杠再转义竖线:GFM 里 `\\` 渲染为字面反斜杠、`\|` 渲染为字面
+    竖线,顺序颠倒会让含 `\\|` 的标题把单元格截断。
+    """
+    return ' '.join(str(value).split()).replace('\\', '\\\\').replace('|', '\\|')
 
 
 def build_report(entries, today, size):
@@ -294,14 +298,17 @@ def build_report(entries, today, size):
         lines += [
             '<!-- no-lessons-due -->',
             '',
-            '没有到期条目:没有条目达到 3 个不同日期,也没有条目 60 天未复发。',
+            (
+                f'没有到期条目:没有条目达到 {PROMOTE_AFTER} 个不同日期,'
+                f'也没有条目 {STALE_DAYS} 天未复发。'
+            ),
             '',
             '下一轮周报会自动重算;这个 issue 可以关闭。',
             '',
         ]
         return '\n'.join(lines)
 
-    lines += ['## 到期升级:Seen 达到 3 个不同日期', '']
+    lines += [f'## 到期升级:Seen 达到 {PROMOTE_AFTER} 个不同日期', '']
     if due:
         lines += ['| 编号 | 标题 | Seen | 证据 |', '| --- | --- | --- | --- |']
         for entry in due:
@@ -318,7 +325,7 @@ def build_report(entries, today, size):
     else:
         lines += ['无。', '']
 
-    lines += ['## 可删除候选:60 天未复发', '']
+    lines += [f'## 可删除候选:{STALE_DAYS} 天未复发', '']
     if stale:
         lines += ['| 编号 | 标题 | 最近 Seen | 证据 |', '| --- | --- | --- | --- |']
         for entry in stale:
