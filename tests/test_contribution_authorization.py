@@ -74,12 +74,12 @@ def _scan_uses(
         violations.append(Violation(source, field, "uses_cla_segment", text))
 
 
-def _scan_env(
-    source: str, field: str, env: object, violations: list[Violation]
+def _scan_mapping(
+    source: str, field: str, mapping: object, violations: list[Violation]
 ) -> None:
-    if not isinstance(env, dict):
+    if not isinstance(mapping, dict):
         return
-    for key, value in env.items():
+    for key, value in mapping.items():
         _scan_text(source, f"{field}.{key}", key, violations)
         _scan_text(source, f"{field}.{key}", value, violations)
 
@@ -116,7 +116,11 @@ def scan_workflow_document(document: object, source: str) -> list[Violation]:
             continue
 
         _scan_text(source, f"{job_field}.name", job.get("name"), violations)
-        _scan_env(source, f"{job_field}.env", job.get("env"), violations)
+        # A reusable workflow is a job-level `uses`, not a step-level one; it
+        # is one of the easiest ways to wire in a CLA without touching `steps`.
+        _scan_uses(source, f"{job_field}.uses", job.get("uses"), violations)
+        _scan_mapping(source, f"{job_field}.env", job.get("env"), violations)
+        _scan_mapping(source, f"{job_field}.with", job.get("with"), violations)
 
         steps = job.get("steps")
         if not isinstance(steps, list):
@@ -130,7 +134,8 @@ def scan_workflow_document(document: object, source: str) -> list[Violation]:
                 continue
             _scan_uses(source, f"{step_field}.uses", step.get("uses"), violations)
             _scan_text(source, f"{step_field}.name", step.get("name"), violations)
-            _scan_env(source, f"{step_field}.env", step.get("env"), violations)
+            _scan_mapping(source, f"{step_field}.env", step.get("env"), violations)
+            _scan_mapping(source, f"{step_field}.with", step.get("with"), violations)
             _scan_run(source, f"{step_field}.run", step.get("run"), violations)
 
     return violations
@@ -321,6 +326,42 @@ jobs:
     violations = scan_workflows(tmp_path)
     assert violations, "a uses path with a cla segment was not flagged"
     assert any(item.rule == "uses_cla_segment" for item in violations)
+
+
+def test_guard_flags_reusable_workflow_with_cla_segment(tmp_path: Path) -> None:
+    _write_workflow(
+        tmp_path,
+        """\
+name: guard self-test
+on: pull_request
+jobs:
+  sign:
+    uses: some-org/cla-workflow/.github/workflows/cla.yml@v1
+""",
+    )
+    violations = scan_workflows(tmp_path)
+    assert violations, "a job-level reusable workflow was not flagged"
+    assert any(item.rule == "uses_cla_segment" for item in violations)
+    assert any(item.field == "jobs.sign.uses" for item in violations)
+
+
+def test_guard_flags_job_level_with_inputs(tmp_path: Path) -> None:
+    _write_workflow(
+        tmp_path,
+        """\
+name: guard self-test
+on: pull_request
+jobs:
+  sign:
+    uses: some-org/automation/.github/workflows/sign.yml@v1
+    with:
+      SERVICE_URL: https://cla-assistant.io/sign
+""",
+    )
+    violations = scan_workflows(tmp_path)
+    assert violations, "a CLA URL in a job-level with input was not flagged"
+    assert any(item.rule == "cla_assistant" for item in violations)
+    assert any("with.SERVICE_URL" in item.field for item in violations)
 
 
 def test_guard_skips_comment_lines_and_clean_copy_returns_empty(
