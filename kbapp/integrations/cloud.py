@@ -399,6 +399,12 @@ def _complete(store, prompt, purpose, max_tokens=3000, thinking=False):
     cfg = store.settings()
     if not cfg['cloud_enabled']:
         raise ValueError('请在设置中配置模型、价格和费用上限后启用云端调用')
+    if cfg['api_key'] is None:
+        # A stored-but-unreadable DPAPI blob (another Windows user, restored
+        # data directory) is a `None` in the settings view. Refuse before
+        # reserve(): letting `'Bearer ' + None` raise later would record a
+        # phantom usage row and surface a TypeError string to the caller.
+        raise ValueError('保存的密钥无法读取，请重新填写')
     input_bound = len((SYSTEM + prompt).encode('utf-8')) + 1024
     amount = (input_bound * cfg['input_price'] + max_tokens * cfg['output_price']) / 1000000
     reservation = store.reserve(amount, purpose)

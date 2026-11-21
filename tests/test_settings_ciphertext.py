@@ -31,6 +31,7 @@ os.environ['KB_NO_REFERENCE_WORKER'] = '1'
 from fastapi.testclient import TestClient  # noqa: E402
 
 from kbapp.core.io import atomic  # noqa: E402
+from kbapp.integrations.cloud import complete  # noqa: E402
 from kbapp.storage.store import Store  # noqa: E402
 from support import service_for  # noqa: E402
 
@@ -158,6 +159,53 @@ class UntouchedSecret(CiphertextCase):
         self.assertEqual(response.json()['zotero_dir'], 'D:/Zotero')
         self.assertEqual(self.read_raw()['api_key'], BLOB)
 
+    def test_settings_page_payload_with_cloud_already_enabled_saves_unrelated_field(self):
+        # 设置页每次保存都提交整张表单（settings.js:18），所以载荷里恒有
+        # `cloud_enabled`；密码框未改动时发 null（settings.js:20）。存量已启用
+        # 且密文读不出时，改 zotero_dir 仍须成功并保留原密文，否则真实客户端
+        # 又被锁死——这正是 #81 要消除的状态。
+        self.write_settings(
+            {
+                'api_base': 'https://api.example.org/v1',
+                'model': 'm',
+                'api_key': BLOB,
+                'openalex_key': BLOB,
+                'budget_mode': 'unlimited',
+                'cloud_enabled': True,
+                'zotero_dir': 'D:/old',
+            }
+        )
+        payload = {
+            'cloud_enabled': True,
+            'budget_mode': 'unlimited',
+            'relation_extractor': 'cloud',
+            'api_base': 'https://api.example.org/v1',
+            'cloud_proxy': '',
+            'model': 'm',
+            'api_key': None,
+            'openalex_key': None,
+            'external_requests_per_run': 100,
+            'cloud_requests_per_run': 12,
+            'zotero_dir': 'D:/new',
+            'local_text_model': 'gemma4:e4b',
+            'local_text_context': 4096,
+            'ocr_pages_per_run': 30,
+            'ocr_regions_per_run': 30,
+            'network_depth': 2,
+            'network_depth_unlimited': False,
+            'daily_budget': 0.0,
+            'input_price': 0.0,
+            'output_price': 0.0,
+        }
+        response = self.post(payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['zotero_dir'], 'D:/new')
+        raw = self.read_raw()
+        self.assertEqual(raw['zotero_dir'], 'D:/new')
+        self.assertEqual(raw['api_key'], BLOB)
+        self.assertEqual(raw['openalex_key'], BLOB)
+        self.assertIs(raw['cloud_enabled'], True)
+
 
 class SuppliedSecret(CiphertextCase):
     """用户写入新值（含空串）时直接覆盖，不需要先解开旧值。"""
@@ -211,6 +259,29 @@ class ApiErrorVocabulary(CiphertextCase):
         response = self.post({'api_base': 'http://public.example/v1'})
         self.assertEqual(response.status_code, 400)
         self.assert_sanitized(response.json()['detail'])
+
+
+class CloudConsumerGuard(CiphertextCase):
+    """settings() 的 None 契约必须被云端调用链消费，不能退化成 TypeError/幽灵用量。"""
+
+    def test_complete_refuses_unreadable_key_before_reserving_budget(self):
+        self.write_settings(
+            {
+                'api_base': 'https://api.example.org/v1',
+                'model': 'm',
+                'api_key': BLOB,
+                'budget_mode': 'unlimited',
+                'cloud_enabled': True,
+            }
+        )
+        with self.assertRaisesRegex(ValueError, '保存的密钥无法读取，请重新填写') as caught:
+            complete(self.store, 'prompt', 'test')
+        message = str(caught.exception)
+        self.assertNotIn('NoneType', message)
+        self.assertNotIn('TypeError', message)
+        # 拒绝发生在 reserve 之前：没有 reserved 用量行，也就不会计入当日额度。
+        with self.store.db() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM usage').fetchone()[0], 0)
 
 
 class NormalPath(CiphertextCase):

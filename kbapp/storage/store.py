@@ -194,6 +194,13 @@ class Store:
         # save of unrelated fields byte for byte.
         raw = read_json(self.paths.state / 'settings.json', {})
         current = self.settings()
+        # The settings page posts the whole form on every save, so its
+        # `cloud_enabled` is the current checkbox state and may be `True` on a
+        # save whose only real change is an unrelated field. Only an explicit
+        # off→on transition with an unreadable key is refused; otherwise the
+        # user would be re-locked out of every settings change (the state #81
+        # exists to remove).
+        was_cloud_enabled = current['cloud_enabled']
         for key, value in values.items():
             if key not in DEFAULTS:
                 raise ValueError(f'未知配置：{key}')
@@ -257,7 +264,7 @@ class Store:
             if not all((current[k] for k in ('api_base', 'model'))):
                 raise ValueError('启用前需填写 API、模型与密钥')
             if current['api_key'] is None:
-                if values.get('cloud_enabled') is True:
+                if not was_cloud_enabled and values.get('cloud_enabled') is True:
                     raise ValueError('保存的密钥无法读取，请重新填写')
             elif not current['api_key']:
                 raise ValueError('启用前需填写 API、模型与密钥')
