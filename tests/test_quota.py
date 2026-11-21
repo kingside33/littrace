@@ -75,8 +75,8 @@ class QuotaDecisions(unittest.TestCase):
     def test_day_of_uses_beijing_natural_day(self):
         self.assertEqual(quota.day_of(datetime.fromisoformat('2026-11-19T23:59:59+08:00')), '2026-11-19')
         self.assertEqual(quota.day_of(datetime.fromisoformat('2026-11-20T00:00:00+08:00')), '2026-11-20')
-        self.assertEqual(quota.day_of(datetime.fromisoformat('2026-11-19T15:59:59Z')), '2026-11-19')
-        self.assertEqual(quota.day_of(datetime.fromisoformat('2026-11-19T16:00:00Z')), '2026-11-20')
+        self.assertEqual(quota.day_of(datetime.fromisoformat('2026-11-19T15:59:59+00:00')), '2026-11-19')
+        self.assertEqual(quota.day_of(datetime.fromisoformat('2026-11-19T16:00:00+00:00')), '2026-11-20')
         self.assertEqual(quota.day_of(datetime(2026, 11, 19, 10, 0, tzinfo=timezone.utc)), '2026-11-19')
 
     def test_day_of_refuses_naive_datetime(self):

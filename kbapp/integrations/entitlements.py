@@ -46,11 +46,17 @@ def _copy(verdict):
 
 
 def _parse_time(value):
-    """把 ISO 字符串解析成带时区的 datetime；坏格式或 naive 返回 None。"""
+    """把 ISO 字符串解析成带时区的 datetime；坏格式或 naive 返回 None。
+
+    `datetime.fromisoformat` 在 Python 3.10 不认识 `Z` 后缀（3.11 才加入），
+    而本仓库支持 3.10+。先把末尾 `Z` 归一化成 `+00:00`，让同一份商业层
+    应答在所有受支持解释器上得到同一结论。
+    """
     if not isinstance(value, str):
         return None
+    text = value[:-1] + '+00:00' if value.endswith(('Z', 'z')) else value
     try:
-        parsed = datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(text)
     except ValueError:
         return None
     if parsed.tzinfo is None or parsed.utcoffset() is None:
@@ -184,16 +190,20 @@ def _fallback(now):
 
 
 def refresh(*, now=None):
-    """发起一次探测并缓存结果；单飞，同一探测窗口内只允许一次传输。"""
+    """在缓存缺失或过期时发起一次探测；并发刷新复用同一次探测结果。
+
+    单飞以“缓存是否仍新鲜”判定，而不是比较调用方的时间戳：真实并发请求
+    各自取 `datetime.now()`，微秒级差异必然不同；只比较时间戳相等会让等待者
+    再发一次探测。持有 `_lock` 期间完成探测，后来者在锁内看到新鲜缓存就直接
+    返回，不再进入 transport。
+    """
     global _cache
     current_time = now or datetime.now(TZ)
     with _lock:
         if _transport is None:
             return _default()
         cached = _cache
-        # 同一时刻（同一个 now）的并发刷新共用一次探测结果：先到者探测，
-        # 后来者拿到的 checked_at 恰好相同，直接读缓存。
-        if cached is not None and cached.get('checked_at') == current_time.isoformat():
+        if cached is not None and not _stale(cached, current_time):
             return _copy(cached)
         try:
             status, body = _transport()

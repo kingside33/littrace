@@ -142,6 +142,15 @@ class EntitlementsMatrix(EntitlementsBase):
         result = self.verdict((503, response()))
         self.assertEqual((result['source'], result['reason']), ('commercial-invalid', 'commercial_invalid_response'))
 
+    def test_zulu_times_are_accepted_on_supported_pythons(self):
+        # Python 3.10 的 fromisoformat 不认 `Z`；生产解析必须归一化，
+        # 否则同一应答在 3.10 变成 invalid、3.11+ 才是合法 pro。
+        zulu = (NOW + timedelta(hours=1)).astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')
+        result = self.verdict((200, response(tier='pro', lease_expires_at=zulu,
+                                             license={'state': 'active', 'expires_at': zulu})))
+        self.assertEqual((result['tier'], result['source'], result['reason']), ('pro', 'commercial', None))
+        self.assertEqual(result['lease_expires_at'], zulu)
+
 
 class EntitlementsCache(EntitlementsBase):
 
@@ -196,7 +205,8 @@ class EntitlementsCache(EntitlementsBase):
         transport.reply = (200, response(tier='free'))
         self.assertEqual(entitlements.refresh(now=NOW + timedelta(seconds=301))['tier'], 'free')
         transport.reply = ConnectionRefusedError('down')
-        result = entitlements.refresh(now=NOW + timedelta(seconds=302))
+        # free 应答的 TTL 是 60 s；越过 TTL 才会重新探测，失败时不得回退到旧 pro。
+        result = entitlements.refresh(now=NOW + timedelta(seconds=362))
         self.assertEqual(result['tier'], 'free')
         self.assertEqual(result['source'], 'commercial-unavailable')
 
@@ -209,7 +219,10 @@ class EntitlementsCache(EntitlementsBase):
         self.assertEqual(transport.calls, 1)
 
     def test_concurrent_refresh_is_single_flight(self):
-        transport = self.install(self.pro_reply((NOW + timedelta(hours=2)).isoformat()))
+        # 不注入 now：两个线程各自取 datetime.now()，微秒必然不同；单飞必须
+        # 靠“缓存仍新鲜”复用结果，而不是靠时间戳相等。
+        lease = (datetime.now(TZ) + timedelta(hours=1)).isoformat()
+        transport = self.install(self.pro_reply(lease))
         barrier = threading.Barrier(2)
         results = []
         errors = []
@@ -217,7 +230,7 @@ class EntitlementsCache(EntitlementsBase):
         def worker():
             try:
                 barrier.wait(timeout=5)
-                results.append(entitlements.refresh(now=NOW))
+                results.append(entitlements.refresh())
             except BaseException as exc:  # pragma: no cover - 失败时给出原因
                 errors.append(exc)
 
@@ -275,14 +288,6 @@ class EntitlementsDefaults(EntitlementsBase):
         first = entitlements.current(now=NOW)
         first['tier'] = 'pro'
         self.assertEqual(entitlements.current(now=NOW)['tier'], 'free')
-
-
-class EntitlementsTime(unittest.TestCase):
-
-    def test_utc_and_beijing_representations_are_the_same_instant(self):
-        self.assertEqual(datetime.fromisoformat('2026-11-19T10:00:00+08:00'),
-                         datetime.fromisoformat('2026-11-19T02:00:00Z'))
-        self.assertIsNotNone(timezone.utc)
 
 
 if __name__ == '__main__':
