@@ -22,15 +22,15 @@ Concretely:
 
 - **Provenance.** Every commit carries a `Signed-off-by` trailer added with
   `git commit -s`, certifying the four statements of DCO 1.1
-  (`CONTRIBUTING.md:532-537`). The `dco` CI job enforces this by running
+  (`CONTRIBUTING.md:541-546`). The `dco` CI job enforces this by running
   `python scripts/ci/check_dco.py` (`.github/workflows/ci.yml:296-316`).
 - **Rights.** The v1 terms grant the maintainer the rights needed for paid
   features, hosted services and separately licensed editions
-  (`CONTRIBUTING.md:539-552`).
+  (`CONTRIBUTING.md:548-561`).
 - **Acceptance.** The terms are accepted by the statement in
   `CONTRIBUTING.md`, the contribution-terms checkbox in the pull request
   template (`.github/PULL_REQUEST_TEMPLATE.md:50-59`) and the sign-off on each
-  commit (`CONTRIBUTING.md:614-626`).
+  commit (`CONTRIBUTING.md:623-635`).
 - **No CLA infrastructure.** There is no CLA text, no signing service, no
   signature-status lookup, and no third-party compliance account, secret or
   environment variable in this repository. "DCO replaces a CLA" is stated in
@@ -44,7 +44,7 @@ The current terms already supply everything a CLA would be introduced to
 obtain; a CLA would duplicate a licence that is already broader than what the
 project needs.
 
-- **§5, maintainer commercial-use licence** (`CONTRIBUTING.md:539-552`) grants
+- **§5, maintainer commercial-use licence** (`CONTRIBUTING.md:548-561`) grants
   the maintainer, its successors and assigns a **perpetual, irrevocable,
   worldwide, non-exclusive, transferable, royalty-free copyright licence, with
   the right to sublicense through multiple tiers**, to reproduce, modify,
@@ -53,28 +53,28 @@ project needs.
   **paid features, hosted services and separately licensed editions**, and
   allows sublicensing under any licence, including proprietary and commercial
   licences.
-- **DCO does not grant sublicensing** (`CONTRIBUTING.md:550-552`): the DCO
+- **DCO does not grant sublicensing** (`CONTRIBUTING.md:559-561`): the DCO
   certifies provenance but grants no copyright licence and no right to
   sublicense. §5 is the section that supplies that right; a CLA is therefore
   not needed to fill a gap in the DCO.
-- **§6, permitted uses** (`CONTRIBUTING.md:554-562`) limits the §5 licence to
+- **§6, permitted uses** (`CONTRIBUTING.md:563-571`) limits the §5 licence to
   the project's related commercial features, paid services (including hosted or
   cloud subscriptions) and commercially licensed editions, including
   institutional dual licensing. It also states that the maintainer is not
   obliged to use the licence, merge the contribution or pay for it, and that a
   contributor may keep licensing their work elsewhere.
-- **§8, patent licence** (`CONTRIBUTING.md:572-581`) grants a perpetual,
+- **§8, patent licence** (`CONTRIBUTING.md:581-590`) grants a perpetual,
   irrevocable, worldwide, royalty-free, non-exclusive patent licence, with a
   termination clause modelled on section 3 of the Apache License 2.0.
-- **§11, acceptance and versioning** (`CONTRIBUTING.md:614-626`) records how
+- **§11, acceptance and versioning** (`CONTRIBUTING.md:623-635`) records how
   the terms are accepted (statement, checkbox, per-commit sign-off) and that a
   later version applies only to contributions submitted on or after its
   effective date. It does not apply retroactively.
-- **§12, survival** (`CONTRIBUTING.md:628-634`) keeps the terms in force after
+- **§12, survival** (`CONTRIBUTING.md:637-643`) keeps the terms in force after
   merge and after the contributor stops participating; the licences already
   granted are irrevocable.
 - The summary statement of the no-CLA stance is at
-  `CONTRIBUTING.md:503-506`: the project does not use a CLA and does not ask
+  `CONTRIBUTING.md:512-515`: the project does not use a CLA and does not ask
   contributors to assign copyright.
 
 ### 2. There are no external contributions to protect yet
@@ -131,7 +131,7 @@ This policy does not implement that upgrade.
    `.github/PULL_REQUEST_TEMPLATE.md:50-59` records intent, but its state lives
    in the pull request body, not in the repository history. It is a reminder,
    not a durable signature; the enforceable record is the commit sign-off
-   (`CONTRIBUTING.md:616-626`).
+   (`CONTRIBUTING.md:625-635`).
 2. **The terms version and blob SHA go only to a volatile job summary.**
    `scripts/ci/check_dco.py:403-419` writes the contribution terms version and
    the `CONTRIBUTING.md` blob SHA into the GitHub Actions job summary. That
@@ -141,12 +141,12 @@ This policy does not implement that upgrade.
    `scripts/ci/check_dco.py:451-455` the check fetches `CONTRIBUTING.md` and
    `DCO` from the default branch. After a terms upgrade, an old pull request is
    therefore judged under the new terms, which conflicts with §11's
-   non-retroactivity rule (`CONTRIBUTING.md:622-626`: a later version applies
+   non-retroactivity rule (`CONTRIBUTING.md:632-635`: a later version applies
    only to contributions submitted on or after its effective date). The
    intended fix is a `Contribution-Terms: vN` trailer that pins the version a
    pull request was submitted under; it is out of scope here.
 
-**Counsel review is still pending.** `CONTRIBUTING.md:643-651` requires counsel
+**Counsel review is still pending.** `CONTRIBUTING.md:652-660` requires counsel
 to review the patent grant, the moral-rights waiver, the employer
 representation and the governing-law question before the repository becomes
 public and before the first external contribution is accepted. That review has
