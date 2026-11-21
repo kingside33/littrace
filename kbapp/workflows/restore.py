@@ -177,7 +177,12 @@ def _validate(backup_db, manifest_path):
     缺字段或值为 None（backup.py 对读取失败字段的既有形态）→ 标记「未记录」继续；
     有值且与实际计数/完整性矛盾 → 失败。size_mb 为 0.1MB 舍入值，不做精确比较。
     """
-    source_sha256 = _file_sha256(backup_db)
+    try:
+        source_sha256 = _file_sha256(backup_db)
+    except OSError as exc:
+        # 备份文件存在但不可读（ACL/独占锁）也必须落在 RestoreError 失败形态，
+        # 不能让裸 OSError 穿过 cli.py 只捕 RestoreError 的分支破坏 JSON 契约。
+        raise RestoreError('validate', f'备份文件无法读取，无法计算 sha256：{exc}') from exc
     try:
         conn = _open_ro_memory(backup_db, immutable=True)
     except sqlite3.Error as exc:
@@ -309,7 +314,12 @@ def restore_backup(paths, backup_dir, target_dir):
         # 阶段 verify：独立复核目标库。
         verified_counts = _verify(final_db, validated['counts'])
         # unchanged 证明：备份文件 sha256 前后一致，否则恢复来源已不可信。
-        sha_after = _file_sha256(backup_db)
+        try:
+            sha_after = _file_sha256(backup_db)
+        except OSError as exc:
+            # 同 _validate：不可读必须进 RestoreError 失败形态（verify 阶段），
+            # 由 except BaseException 完成回滚后再抛出。
+            raise RestoreError('verify', f'备份文件恢复后无法读取，无法核对 sha256：{exc}') from exc
         if sha_after != validated['sha256']:
             raise RestoreError('verify', '备份文件在恢复过程中发生变化，无法证明恢复自选定的历史备份')
     except BaseException:
@@ -326,7 +336,9 @@ def restore_backup(paths, backup_dir, target_dir):
         'manifest': {'created': validated['manifest_created'], 'label': validated['manifest_label'],
                      'unrecorded': validated['unrecorded'], 'historical_paths_metadata_only': True},
         'counts': verified_counts,
-        'target': {'dir': str(target_dir), 'restored_database': str(final_db), 'kept_existing': kept_existing},
+        # dir 与 restored_database 统一为 for_data resolve 后的形态，避免 Windows
+        # 短名/junction 场景下同一目标目录在报告里出现两种拼写（#108 同源）。
+        'target': {'dir': str(target_paths.data), 'restored_database': str(final_db), 'kept_existing': kept_existing},
         'verify': {'integrity': 'ok', 'counts_match_validate': True},
         'active_db': _active_db_report(active_before, active_after),
     }

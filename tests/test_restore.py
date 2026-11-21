@@ -19,6 +19,7 @@ os.environ['KB_NO_STARTUP_JOBS'] = '1'
 os.environ['KB_NO_REFERENCE_WORKER'] = '1'
 from kbapp.storage.store import Store
 from kbapp.workflows.backup import create_backup
+from kbapp.workflows import restore as restore_module
 from kbapp.workflows.restore import RestoreError, restore_backup
 
 
@@ -60,7 +61,10 @@ class Restore(unittest.TestCase):
         report = restore_backup(self.paths, str(self.backup_dir), str(target))
         self.assertTrue(report['ok'])
         restored = Path(report['target']['restored_database'])
-        self.assertEqual(restored, target / 'state' / 'workbench.sqlite3')
+        # 比较 resolve() 后的 Path，不比字符串拼写（ADR 0002）：Windows CI 的 TEMP
+        # 带 8.3 短名（RUNNER~1），Paths.for_data 的 resolve() 会展开成长名，
+        # 两侧指向同一文件而拼写不同（#108）。
+        self.assertEqual(restored.resolve(), (target / 'state' / 'workbench.sqlite3').resolve())
         self.assertTrue(restored.is_file())
         self.assertEqual(ro_scalar(restored, 'SELECT COUNT(*) FROM papers'), 1)
         self.assertEqual(ro_scalar(restored, 'SELECT COUNT(*) FROM relations WHERE manual=1'), 1)
@@ -118,6 +122,54 @@ class Restore(unittest.TestCase):
             restore_backup(self.paths, str(fresh.parent), str(target2))
         self.assertEqual(ctx.exception.stage, 'validate')
         self.assertFalse(target2.exists())
+
+    def test_unreadable_backup_fails_as_restore_error(self):
+        # 备份文件存在但不可读（ACL/独占锁）：_file_sha256 的 OSError 必须转成
+        # RestoreError（stage=validate），不能裸抛穿过 cli.py 只捕 RestoreError 的
+        # 失败分支（PR #105 评审）。
+        with patch('kbapp.workflows.restore._file_sha256', side_effect=OSError('模拟备份文件不可读')):
+            with self.assertRaises(RestoreError) as ctx:
+                restore_backup(self.paths, str(self.backup_dir), str(self.root / 't-sha-validate'))
+        self.assertEqual(ctx.exception.stage, 'validate')
+        self.assertFalse((self.root / 't-sha-validate').exists())
+
+    def test_backup_unreadable_after_restore_fails_clean(self):
+        # 第二处 _file_sha256（恢复后核对 sha256）同样不可裸抛 OSError：失败必须
+        # 落在 verify 阶段，且经回滚不留半成品目录。
+        real_sha256 = restore_module._file_sha256
+        calls = []
+
+        def sha256_then_unreadable(path):
+            calls.append(path)
+            if len(calls) == 2:
+                raise OSError('模拟恢复后备份文件不可读')
+            return real_sha256(path)
+
+        with patch('kbapp.workflows.restore._file_sha256', side_effect=sha256_then_unreadable):
+            with self.assertRaises(RestoreError) as ctx:
+                restore_backup(self.paths, str(self.backup_dir), str(self.root / 't-sha-after'))
+        self.assertEqual(ctx.exception.stage, 'verify')
+        self.assertFalse((self.root / 't-sha-after').exists())
+
+    def test_cli_unreadable_backup_reports_json_failure(self):
+        # CLI 失败形态契约（issue #101 要求 6）：输出 JSON（ok:false + stage + error）
+        # 且退出码 1；OSError 已在 workflow 层转成 RestoreError，不再是 traceback。
+        import io
+        from contextlib import redirect_stdout
+        from kbapp.workflows.cli import main as cli_main
+        buffer = io.StringIO()
+        target = self.root / 't-cli-json'
+        env = {'KB_BASE': str(self.root / 'cli-base'), 'KB_DATA_DIR': str(self.root / 'cli-data')}
+        with patch.dict(os.environ, env):
+            with patch('kbapp.workflows.restore._file_sha256', side_effect=OSError('模拟备份文件不可读')):
+                with redirect_stdout(buffer):
+                    code = cli_main(['restore', '--backup', str(self.backup_dir), '--target', str(target)])
+        self.assertEqual(code, 1)
+        payload = json.loads(buffer.getvalue())
+        self.assertFalse(payload['ok'])
+        self.assertEqual(payload['stage'], 'validate')
+        self.assertIn('sha256', payload['error'])
+        self.assertFalse(target.exists())
 
     def test_count_mismatch_fails_clean(self):
         manifest = json.loads(self.manifest_path.read_text(encoding='utf-8'))
