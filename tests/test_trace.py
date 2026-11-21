@@ -526,7 +526,7 @@ class StopReasons(TraceBase):
         self.assertEqual(classify(ValueError('OpenAlex HTTP 404')), 'missing_source')
         self.assertEqual(classify(ValueError('OpenAlex HTTP 500')), 'network_wait')
         self.assertEqual(classify(ValueError('请在网页配置 OpenAlex key 后继续分页补全')), 'awaiting_key')
-        self.assertEqual(classify(ValueError('题名与年份没有精确匹配')), 'network_wait')
+        self.assertEqual(classify(ValueError('无法解析的响应结构')), 'network_wait')
         self.assertEqual(classify(TimeoutError('timed out')), 'network_wait')
 
     def test_http_404_settles_branch_without_retry(self):
@@ -551,6 +551,28 @@ class StopReasons(TraceBase):
         dead = self.node(snapshot, 'WD')
         self.assertEqual((dead['status'], dead['stop_reason']), ('done', 'missing_source'))
         self.assertEqual(len(calls), 2)  # 定格后不浪费重试
+
+    def test_seed_own_404_completes_with_missing_source_and_one_request(self):
+        # 种子自身 404：任务以 complete 收尾（而非失败态）、种子节点定格
+        # missing_source、hint 为空、请求恰 1 次不重试不拖垮——这是用户可见
+        # 的纯逻辑（trace run 一个失效种子），用 UrlFake 让真实 404 折叠生效。
+        self.add_library(pid='p1', title='Seed', doi='10.1234/a', openalex_id='WA')
+        fake = UrlFake({}, fail=lambda index, path: 404)
+        with patch('kbapp.integrations.openalex.urlopen', side_effect=fake), \
+                patch('kbapp.integrations.openalex.time.sleep', lambda s: None):
+            snapshot = run_task(self.store, start_task(self.store, 'p1', depth=2)['id'])
+        self.assertEqual(snapshot['status'], 'complete')
+        self.assertEqual(snapshot['error'], '')
+        self.assertEqual(snapshot['hint'], '')
+        self.assertEqual(snapshot['requests'], 1)
+        self.assertEqual(fake.requests, [('works/WA', None)])
+        seed = self.node(snapshot, 'WA')
+        self.assertEqual((seed['status'], seed['stop_reason'], seed['refs_state']),
+                         ('done', 'missing_source', 'missing'))
+        self.assertEqual(seed['note'], '数据源缺引用字段或未返回该文献')
+        self.assertEqual(snapshot['counts'],
+                         {'nodes': 1, 'stopped': 1, 'edges': 0, 'pending_branches': 0})
+        self.assertEqual(snapshot['queue'], [])
 
 
 class DepthSettings(TraceBase):
@@ -594,6 +616,35 @@ class DepthSettings(TraceBase):
         self.assertEqual(task_snapshot(self.store, tid)['depth'], 4)
         self.store.save_settings({'network_depth': 1})
         self.assertEqual(task_snapshot(self.store, tid)['depth'], 4)  # 已建任务不随设置漂移
+
+    def test_legacy_written_settings_depth_reaches_engine_snapshot(self):
+        # 直锚「引擎不把存量值重置为 2」：手写旧配置文件（无 network_depth_unlimited
+        # 键、层数为存量 3）→ start_task（无显式层数）→ 快照与任务行都取 3。
+        self.add_library(pid='p1', title='Seed', doi='10.1234/a', openalex_id='WA')
+        atomic(self.store.paths.state / 'settings.json', {'network_depth': 3})
+        snapshot = start_task(self.store, 'p1')
+        self.assertEqual(snapshot['depth'], 3)
+        self.assertFalse(snapshot['unlimited'])
+        row = self.rows('trace_tasks')[0]
+        self.assertEqual((row['depth'], row['unlimited']), (3, 0))
+
+    def test_parse_depth_contract_matches_save_settings(self):
+        # parse_depth 与 save_settings 的键级校验同口径：整数值字符串接受——
+        # 手写 settings.json 的 "2" 与经 API 保存的 2 行为一致；布尔、小数、
+        # 非数值、越界仍拒绝。
+        for value, expected in (('2', 2), ('100', 100), (2.0, 2), (3, 3)):
+            with self.subTest(value=value):
+                self.assertEqual(parse_depth(value), expected)
+        for value, message in (('2.8', '层数应为整数'), ('x', '层数应为数字'), (None, '层数应为数字'),
+                               (True, '层数应为数字'), (-1, '层数应在 1 至 100 之间'),
+                               (0, '层数应在 1 至 100 之间'), (101, '层数应在 1 至 100 之间')):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, message):
+                    parse_depth(value)
+        # 手写 "network_depth": "2" 的设置文件 → start_task 与 API 保存同一口径。
+        self.add_library(pid='p2', title='Seed two', doi='10.1234/b', openalex_id='WB')
+        atomic(self.store.paths.state / 'settings.json', {'network_depth': '2'})
+        self.assertEqual(start_task(self.store, 'p2')['depth'], 2)
 
 
 class Compatibility(TraceBase):

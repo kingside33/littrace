@@ -240,6 +240,53 @@ class TraceCliPaths(TraceCliBase):
         self.assertEqual((code, single['status'], single['counts']['nodes']), (0, 'complete', 4))
 
 
+class TraceCliListing(TraceCliBase):
+    """status 无 --id 的轻量列表：输出与全量快照投影一致，且不触发全量 papers/DFS。"""
+
+    def setUp(self):
+        super().setUp()
+        self.works = {
+            'WA': work('WA', 'Seed', doi='10.1234/a', refs=['WB', 'WC']),
+            'WB': work('WB', 'Via B', refs=['WD']),
+            'WC': work('WC', 'Via C', refs=['WD']),
+            'WD': work('WD', 'Diamond', refs=[]),
+        }
+        self.add_library(pid='p1', title='Seed', doi='10.1234/a', openalex_id='WA')
+        self.store.save_settings({'openalex_key': KEY, 'network_depth': 2})
+        fake = Fake(self.works)
+        with patch.object(OpenAlex, 'get', side_effect=fake.get):
+            code, snapshot, _ = self.cli('trace', 'run', '--paper', 'p1')
+        self.assertEqual(snapshot['status'], 'complete')
+        self.task_id = snapshot['id']
+
+    def test_list_projection_matches_full_snapshot(self):
+        keys = ('id', 'status', 'depth_display', 'seed', 'requests', 'error', 'hint', 'created', 'updated', 'counts')
+        code, listing, _ = self.cli('trace', 'status')
+        self.assertEqual(code, 0)
+        self.assertEqual(len(listing['tasks']), 1)
+        code, snapshot, _ = self.cli('trace', 'status', '--id', self.task_id)
+        self.assertEqual(listing['tasks'][0], {key: snapshot[key] for key in keys})
+
+    def test_list_path_skips_full_papers_and_dfs(self):
+        # 大库 × 多任务下列表必须保持轻查询：不全量加载 papers()、不建邻接表、
+        # 不逐节点 DFS 找路径（这些只属于 --id 单任务全量快照与 paths）。
+        from kbapp.workflows import trace as trace_module
+
+        def forbidden(name):
+            raise AssertionError(f'列表路径不应触发 {name}')
+
+        with patch.object(Store, 'papers', side_effect=lambda: forbidden('papers()')), \
+                patch.object(trace_module, '_adjacency', side_effect=lambda *a: forbidden('_adjacency')), \
+                patch.object(trace_module, '_paths', side_effect=lambda *a: forbidden('_paths')):
+            code, listing, _ = self.cli('trace', 'status')
+        self.assertEqual(code, 0)
+        entry = listing['tasks'][0]
+        self.assertEqual((entry['id'], entry['status'], entry['depth_display']),
+                         (self.task_id, 'complete', '2 层'))
+        self.assertEqual(entry['counts'],
+                         {'nodes': 4, 'stopped': 1, 'edges': 4, 'pending_branches': 0})
+
+
 class TraceCliErrors(TraceCliBase):
     """错误收敛为一句中文 JSON + 退出码 1，不产生半成品任务。"""
 

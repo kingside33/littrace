@@ -72,8 +72,11 @@ test('depth control renders in the citation section with five options and the A/
   for(const option of ['<option value="1">1 层</option>','<option value="2">2 层</option>','<option value="3">3 层</option>','<option value="custom">自定义正整数</option>','<option value="unlimited">不限层数</option>'])assert.ok(html.includes(option),option);
   assert.match(html,/A 是种子，A 引用的 B 是第 1 层，B 引用的 C 是第 2 层/);
   assert.match(html,/每轮外部请求预算仍然生效/);
-  // 旧文案把层数钉死为「上下游各两层」，会与本控件矛盾。
-  assert.ok(!html.includes('上下游各两层'));
+  // 帮助文案要同时交代该预算的两类消费者：上游追溯按层数取数；普通更新
+  // 固定上下游各两层（network.py 的 depth<2 硬编码未动），也在同一预算内。
+  assert.match(html,/上游追溯按层数取数/);
+  assert.match(html,/普通更新固定上下游各两层/);
+  assert.match(html,/未完成部分下次续跑/);
 });
 
 test('default and saved values map onto the selector; stored non-preset depth shows the custom input',async()=>{

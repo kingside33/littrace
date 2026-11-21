@@ -69,8 +69,7 @@ def trace_command(store, args):
     run 同步推进一轮直至 完成/暂停/预算耗尽/缺 key；ValueError 统一冒泡，
     由 main 的 trace 分支收敛为一句中文与退出码 1。
     """
-    from kbapp.storage.trace import ensure_schema
-    from kbapp.workflows.trace import handle_pause, handle_resume, handle_start, handle_status
+    from kbapp.workflows.trace import handle_list, handle_pause, handle_resume, handle_start, handle_status
     if args.action == 'run':
         if not args.paper:
             raise ValueError('trace run 需要 --paper 指定种子文献（文献 ID、citekey、OpenAlex WID 或 DOI）')
@@ -82,11 +81,8 @@ def trace_command(store, args):
     if args.action == 'resume':
         return handle_resume(store, args.id)
     if not args.id:
-        ensure_schema(store)
-        with store.db() as db:
-            ids = [r[0] for r in db.execute('SELECT id FROM trace_tasks ORDER BY created DESC,rowid DESC LIMIT 30')]
-        keys = ('id', 'status', 'depth_display', 'seed', 'requests', 'error', 'hint', 'created', 'updated', 'counts')
-        return {'tasks': [{key: handle_status(store, tid)[key] for key in keys} for tid in ids]}
+        # 列表走轻查询（摘要 + 聚合计数），不做逐任务全量快照；--id 仍是全量。
+        return handle_list(store)
     snapshot = handle_status(store, args.id)
     if args.action == 'status':
         return snapshot

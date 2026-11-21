@@ -23,13 +23,13 @@
 """
 from __future__ import annotations
 import json
+import math
 import os
 import time
 from urllib.parse import quote
 from kbapp.core.io import atomic, digest, now
 from kbapp.core.locks import update_lock
 from kbapp.integrations.openalex import OpenAlex
-from kbapp.library.sources import norm
 from kbapp.storage.trace import ensure_schema
 from kbapp.workflows.references import TTL, age, cache_raw, ingest
 
@@ -61,6 +61,12 @@ ERROR_CLASSES = (
 )
 ROUND_STATES = {'complete': 'complete', 'paused': 'paused', 'budget_wait': 'awaiting_budget',
                 'network_wait': 'deferred', 'awaiting_key': 'awaiting_key'}
+HINTS = {
+    'awaiting_key': '请在工作台设置页配置 OpenAlex key 后继续追溯',
+    'awaiting_budget': '本轮外部请求预算或限流已到，进度已保留，可稍后继续',
+    'deferred': '临时网络故障，进度已保留，可稍后继续',
+    'paused': '任务已暂停，继续后从断点推进',
+}
 
 
 class _PauseRequested(Exception):
@@ -87,17 +93,24 @@ def classify(exc):
 
 
 def parse_depth(value):
-    """校验层数值（显式参数与设置值共用）；文案与 save_settings 的键级校验一致。"""
+    """校验层数值（显式参数与设置值共用）；与 save_settings 的键级校验同口径。
+
+    整数值字符串接受（手写 settings.json 的 "2" 与 API 保存的 2 行为一致），
+    布尔拒绝，小数拒绝而不是静默截断。"""
     if isinstance(value, bool):
         raise ValueError('层数应为数字')
     if isinstance(value, int):
         number = value
-    elif isinstance(value, float):
-        if not value.is_integer():
-            raise ValueError('层数应为整数')
-        number = int(value)
     else:
-        raise ValueError('层数应为数字')
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            raise ValueError('层数应为数字') from None
+        if not math.isfinite(number):
+            raise ValueError('层数应为数字')
+        if not number.is_integer():
+            raise ValueError('层数应为整数')
+        number = int(number)
     if not MIN_DEPTH <= number <= MAX_DEPTH:
         raise ValueError('层数应在 1 至 100 之间；不限层数请选择「不限层数」')
     return number
@@ -326,19 +339,17 @@ def _fetch_own_work(store, task_id, client, row, task, papers, widmap):
 
 
 def _seed_query(store, client, task, wid):
-    """种子单篇请求：wid 直取；仅 DOI 的走 DOI 精确；都没有的题名+年份精确匹配。"""
+    """种子单篇请求：wid 直取；仅 DOI 的走 DOI 精确。
+
+    既无 wid 也无 DOI 的种子已被 start_task 拒绝（守卫文案同下），这里不再有
+    第三条解析路径；守卫分支只为不变量被破坏时给出可理解错误。"""
     if wid:
         return client.get('works/' + wid)
     record = store.papers().get(task['seed_paper_id'], {})
     doi = (record.get('doi') or '').removeprefix('https://doi.org/')
-    if doi:
-        return client.get('works/https://doi.org/' + quote(doi, safe='/'))
-    hits = client.get('works', {'search': record.get('title', ''), 'per_page': 5}).get('results', [])
-    raw = next((h for h in hits if norm(h.get('title')) == norm(record.get('title'))
-                and h.get('publication_year') == record.get('year')), None)
-    if not raw:
-        raise ValueError('题名与年份没有精确匹配，无法确定种子的 OpenAlex 记录')
-    return raw
+    if not doi:
+        raise ValueError('种子文献缺少 OpenAlex ID 与 DOI，无法沿 OpenAlex 向上游追溯')
+    return client.get('works/https://doi.org/' + quote(doi, safe='/'))
 
 
 def _rewrite_seed(store, task_id, wid):
@@ -587,12 +598,6 @@ def task_snapshot(store, task_id):
             'paths': _paths(adjacency, seed_wid, node['wid']),
         })
     stopped = sum(1 for n in views if n['stop_reason'])
-    hints = {
-        'awaiting_key': '请在工作台设置页配置 OpenAlex key 后继续追溯',
-        'awaiting_budget': '本轮外部请求预算或限流已到，进度已保留，可稍后继续',
-        'deferred': '临时网络故障，进度已保留，可稍后继续',
-        'paused': '任务已暂停，继续后从断点推进',
-    }
     return {
         'id': task_id, 'status': task['status'], 'depth': task['depth'],
         'unlimited': bool(task['unlimited']),
@@ -600,7 +605,7 @@ def task_snapshot(store, task_id):
         'seed': {'paper_id': task['seed_paper_id'], 'wid': seed_wid, 'label': task['seed_label']},
         'requests': task['requests'], 'error': task['error'], 'pid': task['pid'],
         'created': task['created'], 'updated': task['updated'],
-        'hint': hints.get(task['status'], ''),
+        'hint': HINTS.get(task['status'], ''),
         'counts': {'nodes': len(views), 'stopped': stopped, 'edges': edge_count, 'pending_branches': len(queue)},
         'queue': [{'wid': q['wid'], 'depth': q['depth'], 'error': q['error']} for q in queue],
         'nodes': views,
@@ -652,6 +657,39 @@ def handle_start(store, paper, depth=None, unlimited=None):
 
 def handle_status(store, task_id):
     return task_snapshot(store, task_id)
+
+
+def handle_list(store, limit=30):
+    """最近任务的轻量列表：只取任务行摘要与两条 COUNT 聚合。
+
+    与 task_snapshot（--id 单任务全量快照）的差别：不全量加载 papers、不建
+    邻接表、不逐节点 DFS 找路径——大库 × 多任务下列表保持常量级查询。
+    输出键与快照的投影完全一致，一致性由 tests/test_trace_cli.py 锚定。"""
+    ensure_schema(store)
+    with store.db() as db:
+        rows = db.execute('SELECT id,status,depth,unlimited,seed_paper_id,seed_wid,seed_label,'
+                          'requests,error,created,updated FROM trace_tasks '
+                          'ORDER BY created DESC,rowid DESC LIMIT ?', (limit,)).fetchall()
+        nodes = dict(db.execute('SELECT task_id,COUNT(*) FROM trace_nodes GROUP BY task_id').fetchall())
+        stopped = dict(db.execute("SELECT task_id,COUNT(*) FROM trace_nodes WHERE stop_reason!=''"
+                                  ' GROUP BY task_id').fetchall())
+        edges = dict(db.execute('SELECT task_id,COUNT(*) FROM trace_edges GROUP BY task_id').fetchall())
+        pending = dict(db.execute("SELECT task_id,COUNT(*) FROM trace_queue WHERE status='pending'"
+                                  ' GROUP BY task_id').fetchall())
+    tasks = []
+    for row in rows:
+        task = dict(row)
+        tasks.append({
+            'id': task['id'], 'status': task['status'],
+            'depth_display': '不限层数' if task['unlimited'] else f"{task['depth']} 层",
+            'seed': {'paper_id': task['seed_paper_id'], 'wid': task['seed_wid'], 'label': task['seed_label']},
+            'requests': task['requests'], 'error': task['error'],
+            'hint': HINTS.get(task['status'], ''),
+            'created': task['created'], 'updated': task['updated'],
+            'counts': {'nodes': nodes.get(task['id'], 0), 'stopped': stopped.get(task['id'], 0),
+                       'edges': edges.get(task['id'], 0), 'pending_branches': pending.get(task['id'], 0)},
+        })
+    return {'tasks': tasks}
 
 
 def handle_pause(store, task_id):
