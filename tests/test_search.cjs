@@ -45,6 +45,54 @@ test('a superseded search cannot overwrite the current question results or the e
   assert.match(app.element('#evidence-count').textContent,/已选 1 条证据/);
 });
 
+test('a late library browse response arriving after a newer search touches neither results nor the selection',async()=>{
+  const app=setup([]);const browse=[];
+  app.context.mockAPI=path=>{
+    if(path.startsWith('/api/library'))return new Promise(done=>browse.push(done));
+    if(path.startsWith('/api/search'))return Promise.resolve({mode:'bm25',results:[{id:'new1',kind:'paper_text',title:'Fresh search hit',text:'fresh text',page_start:1,page_end:1}]});
+    throw Error('unexpected request: '+path);};
+  vm.runInContext('api=mockAPI;',app.context);
+  app.view.searchPage();app.element('#query').value='shared query';
+  app.element('#browse-library').onclick();
+  app.element('#search-form').onsubmit({preventDefault(){}});
+  await new Promise(done=>setImmediate(done));
+  assert.match(app.element('#results').innerHTML,/data-evidence-check="new1"/);
+  app.view.toggleEvidence({id:'new1',kind:'paper_text',title:'Fresh search hit',text:'fresh text',page_start:1,page_end:1},true);
+  assert.match(app.element('#evidence-count').textContent,/已选 1 条证据/);
+  browse[0]({items:[{id:'stale1',title:'Stale browse hit',abstract:'stale abstract'}],total:1});
+  await new Promise(done=>setImmediate(done));
+  assert.match(app.element('#results').innerHTML,/data-evidence-check="new1"/);
+  assert.doesNotMatch(app.element('#results').innerHTML,/Stale browse hit/);
+  assert.equal(app.view.evidenceSelection.size,1);
+  assert.ok(app.view.evidenceSelection.has('new1')&&!app.view.evidenceSelection.has('stale1'));
+  assert.match(app.element('#evidence-count').textContent,/已选 1 条证据/);
+});
+
+test('a late older library page response cannot override the newer page request',async()=>{
+  const app=setup([]);const pages=[];
+  app.context.mockAPI=path=>{if(path.startsWith('/api/library'))return new Promise(done=>pages.push(done));throw Error('unexpected request: '+path);};
+  vm.runInContext('api=mockAPI;',app.context);
+  app.view.searchPage();app.element('#query').value='paged query';
+  app.element('#browse-library').onclick();
+  await new Promise(done=>setImmediate(done));
+  pages.shift()({items:[{id:'p1',title:'Page one hit',abstract:'a'}],total:150});
+  await new Promise(done=>setImmediate(done));
+  assert.match(app.element('#results').innerHTML,/Page one hit/);
+  app.view.toggleEvidence({id:'p1',kind:'metadata',title:'Page one hit'},true);
+  app.element('#library-next').onclick();
+  app.element('#library-prev').onclick();
+  await new Promise(done=>setImmediate(done));
+  pages.shift()({items:[{id:'p2',title:'Page two hit',abstract:'b'}],total:150});
+  await new Promise(done=>setImmediate(done));
+  assert.match(app.element('#results').innerHTML,/Page one hit/);
+  assert.doesNotMatch(app.element('#results').innerHTML,/Page two hit/);
+  assert.equal(app.view.evidenceSelection.size,1);
+  assert.ok(app.view.evidenceSelection.has('p1'));
+  pages.shift()({items:[{id:'p1',title:'Page one hit',abstract:'a'}],total:150});
+  await new Promise(done=>setImmediate(done));
+  assert.match(app.element('#results').innerHTML,/Page one hit/);
+});
+
 test('actual retrieval mode and pending coverage are distinct in results and answers',()=>{
   const app=setup([]),data={mode:'two-stage-hybrid+rerank',vector_status:'cached',coverage:{vectors:47439,published_sources:47439,live_vector_pending:5389},results:[{id:'s',kind:'paper_text',title:'Semantic source',text:'Evidence',retrieval:{vector_rank:1,keyword_rank:null}}]};
   app.view.renderResults(data);const html=app.element('#results').innerHTML;
@@ -249,4 +297,23 @@ test('clipboard refusal keeps the selection and shows the same text for manual c
   assert.equal(app.element('#evidence-dialog').open,true);
   assert.equal(app.element('#evidence-copy-text').value,attempted[0]);
   assert.match(attempted[0],/Dialog Paper/);assert.match(attempted[0],/> Dialog evidence/);
+});
+
+test('the hidden-textarea execCommand fallback copies without opening the manual dialog',async()=>{
+  const app=setup([]),fields=[],commands=[];
+  app.context.document.createElement=()=>{const field={value:'',setAttribute(){},style:{},select(){},remove(){field.removed=true;}};fields.push(field);return field;};
+  app.context.document.execCommand=command=>{commands.push(command);return true;};
+  const results=[{id:'m1',kind:'paper_text',title:'Exec Paper',text:'Exec evidence',page_start:1,page_end:1}];
+  app.view.renderResults({results});
+  app.view.toggleEvidence(results[0],true);
+  await vm.runInContext('copyEvidenceMarkdown()',app.context);
+  assert.deepEqual(commands,['copy']);
+  assert.equal(fields.length,1);
+  assert.equal(fields[0].removed,true);
+  assert.match(fields[0].value,/- \*\*Exec Paper\*\* · 论文原文 · p\.1/);
+  assert.match(fields[0].value,/> Exec evidence/);
+  assert.match(app.element('#toast').textContent,/已复制 1 条证据/);
+  assert.equal(app.element('#evidence-dialog').open,false);
+  assert.equal(app.element('#dialog-content').innerHTML,'');
+  assert.equal(app.view.evidenceSelection.size,1);
 });
