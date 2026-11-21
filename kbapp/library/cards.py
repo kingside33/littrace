@@ -4,7 +4,8 @@ import os
 import re
 import unicodedata
 from collections import defaultdict
-from kbapp.core.config import DIRECTIONS as _DIRECTION_ROWS, DIR_NAME, env_json
+from kbapp.core.config import DIRECTIONS as _DIRECTION_ROWS, DIR_NAME, DIR_ORDER, env_json
+from kbapp.core.io import digest
 BASE = str(__import__('kbapp.core.paths', fromlist=['Paths']).Paths.from_base().base)
 PERSIST_START = '<!-- PERSIST:START -->'
 PERSIST_END = '<!-- PERSIST:END -->'
@@ -22,7 +23,55 @@ def _env_rules(name, default):
 _DEFAULT_FOLDER_RULES = [(DIR_NAME[d], [d]) for d in DIR_NAME if d != '90']
 COLLECTION_RULES = _env_rules('KB_COLLECTION_RULES', _DEFAULT_FOLDER_RULES)
 DISK_RULES = _env_rules('KB_DISK_RULES', _DEFAULT_FOLDER_RULES)
-KEYWORD_RULES = [('覆盖|coverage|CPP|inspection|巡检|检测', ['04']), ('构型|变构|articulat|reconfigur|snake|蛇形', ['01', '05']), ('ROI|入口|交接|docking|handover', ['03']), ('路径规划|path planning|RRT|A\\*|Dijkstra|轨迹|trajectory', ['02']), ('优化|optimiz|metaheuristic|群智能|蚁群|粒子群|遗传', ['06']), ('传感器|sensor|感知|electric sense|SLAM|声呐|sonar|光场', ['08']), ('浊流|turbidity|沉积|sediment|海洋学|oceanograph', ['09'])]
+# 内置题名→方向词表按机器人／路径规划词汇编写，仅作为 KB_TITLE_RULES 未设置时的默认值；
+# 非原领域的库用 KB_TITLE_RULES 覆盖（与 KB_DIRECTIONS 配套设置）。
+_DEFAULT_TITLE_RULES = [('覆盖|coverage|CPP|inspection|巡检|检测', ['04']), ('构型|变构|articulat|reconfigur|snake|蛇形', ['01', '05']), ('ROI|入口|交接|docking|handover', ['03']), ('路径规划|path planning|RRT|A\\*|Dijkstra|轨迹|trajectory', ['02']), ('优化|optimiz|metaheuristic|群智能|蚁群|粒子群|遗传', ['06']), ('传感器|sensor|感知|electric sense|SLAM|声呐|sonar|光场', ['08']), ('浊流|turbidity|沉积|sediment|海洋学|oceanograph', ['09'])]
+
+
+def validate_title_rules(value, name='KB_TITLE_RULES'):
+    """校验 [[正则, [方向编号]], ...] 并归一化；显式空列表合法（关闭题名推断）。"""
+    if not isinstance(value, list) or any((not isinstance(row, (list, tuple)) or len(row) != 2 for row in value)):
+        raise ValueError(f'{name} 必须是 [[正则, [方向编号]], ...] 形式的 JSON 数组')
+    rules = []
+    for index, row in enumerate(value, 1):
+        pattern, dirs = row
+        if not isinstance(pattern, str) or not pattern:
+            raise ValueError(f'{name} 第 {index} 条 {json.dumps(row, ensure_ascii=False)} 的正则必须是非空字符串')
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise ValueError(f'{name} 第 {index} 条 ({json.dumps(pattern, ensure_ascii=False)}, {json.dumps(dirs, ensure_ascii=False)}) 的正则无效: {exc}') from exc
+        if not isinstance(dirs, (list, tuple)) or not dirs:
+            raise ValueError(f'{name} 第 {index} 条 ({json.dumps(pattern, ensure_ascii=False)}) 的方向编号必须是非空数组')
+        ids = [str(d) for d in dirs]
+        for d in ids:
+            if d not in DIR_ORDER:
+                raise ValueError(f'{name} 第 {index} 条 ({json.dumps(pattern, ensure_ascii=False)}, {json.dumps(dirs, ensure_ascii=False)}) 的方向编号 {json.dumps(d, ensure_ascii=False)} 不在方向表中')
+        rules.append((pattern, ids))
+    return rules
+
+
+def load_title_rules():
+    """题名→方向规则三态：未设置 KB_TITLE_RULES 用内置词表，显式 [] 关闭题名推断，其余校验后生效。"""
+    value = env_json('KB_TITLE_RULES', None)
+    if value is None:
+        try:
+            return validate_title_rules(_DEFAULT_TITLE_RULES)
+        except ValueError as exc:
+            # 内置词表对生效方向表 fail-fast(DR-1)时，指明这是默认值而非用户配置，并给出出路。
+            raise ValueError(
+                f'内置题名词表(未设置 KB_TITLE_RULES 时的默认值)不在生效方向表内: {exc}; '
+                '处理方式: 设置 KB_TITLE_RULES 显式给出题名规则, 或让 KB_DIRECTIONS 保留内置词表引用的方向编号'
+            ) from exc
+    return validate_title_rules(value)
+
+
+KEYWORD_RULES = load_title_rules()
+
+
+def title_rules_digest():
+    """生效规则摘要：进分类指纹与图谱缓存键，规则变化后内存与磁盘缓存自动失效。"""
+    return digest(json.dumps(KEYWORD_RULES, ensure_ascii=False))
 TAG_FIELDS = {'task': 'task', 'robot': 'robot', 'env': 'env', 'constraint': 'constraint', 'method': 'method', 'priority': 'priority', 'reading_tier': 'reading_tier', 'review_status': 'review_status', 'relation': 'relation', 'era': 'era', 'pdf_status': 'pdf_status', 'domain_transfer': 'domain_transfer', 'library_tier': 'library_tier'}
 
 def norm_text(s):
