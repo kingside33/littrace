@@ -21,6 +21,9 @@ def create_app(context):
 
     @contextlib.asynccontextmanager
     async def lifespan(app):
+        # 安装真实探测器本身不发请求；只有请求路径读缓存过期时才探测。
+        from kbapp.integrations import entitlements
+        entitlements.install(entitlements.fetch)
         stop = threading.Event()
         if context.background_jobs:
             from kbapp.web.document_api import recover_documents
@@ -44,13 +47,18 @@ def create_app(context):
                             start_update(bootstrap=not bool(store.state('active_version')))
                         stop.wait(30)
                 threading.Thread(target=scheduler, daemon=True, name='kb-scheduler').start()
-        yield
-        stop.set()
-        from kbapp.integrations.models import stop_text_runtime
-        if context.background_jobs:
-            from kbapp.workflows.agents import stop_dispatcher
-            stop_dispatcher(store)
-            stop_text_runtime(store)
+        try:
+            yield
+        finally:
+            stop.set()
+            from kbapp.integrations.models import stop_text_runtime
+            if context.background_jobs:
+                from kbapp.workflows.agents import stop_dispatcher
+                stop_dispatcher(store)
+                stop_text_runtime(store)
+            # 正常与异常退出都回到默认 free/unconfigured，避免进程级授权
+            # 缓存泄漏到下一次 create_app（例如 app 级测试之间）。
+            entitlements.reset()
     app = FastAPI(title='研究文献工作台', docs_url=None, redoc_url=None, lifespan=lifespan)
     install_document_api(app, store)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=['127.0.0.1', 'localhost', 'testserver'])
@@ -92,4 +100,6 @@ def create_app(context):
     install_static_api(app, context, TOKEN)
     from kbapp.web.v2_api import install as install_v2_api
     install_v2_api(app, context, TOKEN)
+    from kbapp.web.entitlements_api import install as install_entitlements_api
+    install_entitlements_api(app, context, TOKEN)
     return app
