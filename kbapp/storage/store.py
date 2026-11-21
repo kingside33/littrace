@@ -9,6 +9,12 @@ from kbapp.core.secrets import protect
 from kbapp.core.io import TZ, atomic, digest, now, read_json
 from kbapp.core.config import DEFAULTS, KINDS
 
+# Stored secrets: DPAPI ciphertext bound to the current Windows user. A blob
+# copied from another machine/account (or after a profile rebuild) may exist but
+# be undecryptable, which is a state callers must be able to tell apart from
+# "no key stored". See `settings()`.
+SECRET_KEYS = ('api_key', 'openalex_key')
+
 class Store:
 
     def __init__(self, base=None, *, data_dir=None, paths=None):
@@ -144,26 +150,54 @@ class Store:
         }
 
     def settings(self, public=False):
+        """Read settings, never raising because a stored secret cannot be decrypted.
+
+        DPAPI ciphertext is bound to the Windows user that wrote it, so a data
+        directory restored from a backup, copied from another machine/account,
+        or read after a profile rebuild can hold a secret this process cannot
+        open. In that case the non-public view returns `None` for that key: a
+        stored-but-unreadable secret is distinguishable both from `''`
+        (nothing stored) and from plaintext. `None` is falsy, so callers that
+        only ask "is there a usable key?" keep working.
+
+        The public view (booleans only) still reports `True`, because a secret
+        *is* stored; `save_settings` never needs to reveal it to decide what to
+        do with an untouched key (it writes the stored bytes back verbatim).
+        """
         result = dict(DEFAULTS)
         data = read_json(self.paths.state / 'settings.json', {})
         for key, value in data.items():
-            if key in {'api_key', 'openalex_key'}:
-                result[key] = bool(value) if public else protect(value, decrypt=True)
+            if key in SECRET_KEYS:
+                result[key] = bool(value) if public else self._reveal(value)
             elif key in DEFAULTS:
                 result[key] = value
         if public:
-            for key in ('api_key', 'openalex_key'):
+            for key in SECRET_KEYS:
                 result[key] = bool(result[key])
         return result
+
+    @staticmethod
+    def _reveal(value):
+        """Decrypt one stored secret; `None` means stored but unreadable."""
+        if not value:
+            return ''
+        try:
+            return protect(value, decrypt=True)
+        except Exception:  # DPAPI/base64 failures are environmental, not caller errors
+            return None
 
     def save_settings(self, values):
         from urllib.parse import urlparse
         import math
+        # The raw map is what an untouched secret is written back from: it may
+        # hold ciphertext this process cannot decrypt, which must survive a
+        # save of unrelated fields byte for byte.
+        raw = read_json(self.paths.state / 'settings.json', {})
         current = self.settings()
         for key, value in values.items():
             if key not in DEFAULTS:
                 raise ValueError(f'未知配置：{key}')
-            if key in {'api_key', 'openalex_key'} and value is None:
+            if key in SECRET_KEYS and value is None:
                 continue
             if key == 'network_depth':
                 # 追溯层数在通用数值分支之前做键级校验：布尔与非数值显式拒绝
@@ -213,11 +247,32 @@ class Store:
         if not 2048 <= current['local_text_context'] <= 32768:
             raise ValueError('本地核验上下文应在 2048 至 32768 之间')
         if current['cloud_enabled']:
-            if not all((current[k] for k in ('api_base', 'model', 'api_key'))):
+            # Check the non-secret fields first so the normal-path message is
+            # unchanged. A `None` api_key means "stored but unreadable": it
+            # cannot be used, so an explicit request to enable cloud calls gets
+            # a message naming the fix instead of echoing a DPAPI/base64
+            # exception. Saves that do not touch the switch keep working (the
+            # ciphertext is written back verbatim below), so an unrelated
+            # settings change cannot re-lock the page.
+            if not all((current[k] for k in ('api_base', 'model'))):
+                raise ValueError('启用前需填写 API、模型与密钥')
+            if current['api_key'] is None:
+                if values.get('cloud_enabled') is True:
+                    raise ValueError('保存的密钥无法读取，请重新填写')
+            elif not current['api_key']:
                 raise ValueError('启用前需填写 API、模型与密钥')
             if current['budget_mode'] == 'limited' and (not all((current[k] for k in ('daily_budget', 'input_price', 'output_price')))):
                 raise ValueError('限额模式需填写输入/输出价格与每日限额；暂不限制需明确选择不限额模式')
-        encrypted = {k: protect(v) if k in {'api_key', 'openalex_key'} else v for k, v in current.items()}
+        encrypted = {}
+        for key, value in current.items():
+            if key in SECRET_KEYS:
+                # A value supplied in this request (including '' to clear) is
+                # encrypted fresh, without ever opening the old ciphertext.
+                # An untouched key is written back exactly as stored: decrypt
+                # + re-encrypt would fail outright when the blob is unreadable.
+                encrypted[key] = protect(value) if key in values and values[key] is not None else raw.get(key, '')
+            else:
+                encrypted[key] = value
         atomic(self.paths.state / 'settings.json', encrypted)
         # A cache location change must take effect now, not on the next restart.
         # A path that cannot be created or written raises here, after the other
