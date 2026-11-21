@@ -306,7 +306,10 @@ class SameHostRedirectHandler(HTTPRedirectHandler):
     urllib 默认会在重定向时保留请求头（只剥 Content-Length 与 Content-Type），
     一个被攻破或恶意配置的端点只要回 302 到自己的域名，就能让本机把 Bearer
     密钥明文送出去。SECURITY.md 把「密钥经 API/日志/诊断/错误信息泄漏」列为
-    in-scope，所以探测路径必须带这道防护。
+    in-scope，所以所有出站云端请求（探测与写路径）都必须带这道防护。
+
+    301 与 302 走同一个 `redirect_request`：`probe_code()` 的映射表把两者都归为
+    `redirect_refused`，这里也一视同仁，不因为 301 是「永久」跳转就放行。
 
     返回 None 让 urllib 拒绝跟随（随即以 HTTPError 形式抛出，由调用方归类）。
 
@@ -331,7 +334,7 @@ class SameHostRedirectHandler(HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def open_cloud(request, cfg, on_fallback=lambda: None, timeout=None, guard_redirects=False):
+def open_cloud(request, cfg, on_fallback=lambda: None, timeout=None, guard_redirects=True):
     """发出一个云端请求；代理可用时优先本地代理，未发出模型请求时回退系统网络。
 
     `timeout=None` 保持既有预算（代理 10s、系统 150s），既有调用方一个字不用改。
@@ -341,9 +344,10 @@ def open_cloud(request, cfg, on_fallback=lambda: None, timeout=None, guard_redir
     服务端若与之相等，用户会先看到客户端的「无法连接本地服务」，永远拿不到探测结论。
     早先的实现把两条腿各给 5s，最坏 10.03s 正好撞上那条线，与它想避免的失效路径相同。
 
-    `guard_redirects=True` 时两条路径都装 SameHostRedirectHandler。既有 `complete()`
-    不加（默认 False），保持它现在的传输行为不变——那里跟随重定向的既有暴露面
-    单列在这个 issue 里修，不在本 PR 里顺手改掉一条已经上线的写路径。
+    默认（`guard_redirects=True`）两条路径都装 SameHostRedirectHandler：urllib 跟随
+    重定向时会保留请求头，写路径 `complete()` 同样带着 Authorization，不能把密钥
+    转发给另一个 origin。只有显式传 `guard_redirects=False` 才恢复 urllib 的默认
+    重定向处理；当前没有调用方这样做。
     """
     deadline = None if timeout is None else time.monotonic() + timeout
 
