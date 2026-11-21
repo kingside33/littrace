@@ -1,0 +1,57 @@
+name: Reusable pytest
+
+# Called by the fast `pytest` job and the heavy `pytest-platforms` job. The
+# install and test commands live here so the two lanes cannot drift.
+
+"on":
+  workflow_call:
+    inputs:
+      os:
+        description: Runner label for this leg.
+        required: true
+        type: string
+      python:
+        description: CPython version for this leg.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    name: pytest
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 15
+    env:
+      # The suite stores and reads non-ASCII paths and text. Force UTF-8 mode
+      # so Windows does not depend on the runner's active code page.
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ inputs.python }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            pyproject.toml
+
+      - name: Install dependencies
+        shell: bash
+        env:
+          PIP_DEFAULT_TIMEOUT: "30"
+          PIP_RETRIES: "5"
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      # pyproject.toml declares the `network` and `model` markers, and the
+      # suite must stay offline in CI: there are no model files or network
+      # credentials on a hosted runner. A test that needs either resource must
+      # carry the marker and skip cleanly when it is unavailable.
+      - name: Run the offline test suite
+        run: python -m pytest -m "not network and not model" -rs --durations=10

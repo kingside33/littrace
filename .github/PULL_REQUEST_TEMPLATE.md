@@ -18,6 +18,8 @@ Fixes #
 - [ ] `node --test tests/test_*.cjs` (Git Bash; on PowerShell list the files)
 - [ ] `ruff check .`
 - [ ] Tried the affected command or workbench flow locally
+- [ ] If this changes cross-platform behaviour, packaging, or the Python
+      version floor: the PR carries the `full-ci` label (heavy lane)
 - [ ] Not applicable, because:
 
 ### Scope not verified

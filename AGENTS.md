@@ -117,6 +117,11 @@ cd plugin && npm run build                                    # 插件构建(plu
 - 命令假定虚拟环境已激活(环境搭建见 CONTRIBUTING.md)。未激活时用显式
   解释器:Windows `.venv\Scripts\python.exe`,macOS/Linux `.venv/bin/python`。
 
+- 普通 PR 只跑快线;改动涉及跨平台行为、打包或 Python 版本下限时,给 PR 打
+  `full-ci` 标签跑重型全量。`CI gate` 是唯一稳定的 required context:普通 PR
+  上重型全 skip 时判 `deferred`,`full-ci` / `merge_group` 上 skip 即红。
+  不要用删标签绕过重型失败。
+
 - `node --test` 用 ci.yml 里的显式清单,不用目录 glob;新增 `tests/test_*.cjs`
   时同步 ci.yml 的两处(守卫清单与运行清单),守卫会挡住漏登记。
 - 真机验收:见 `docs/adr/` 的验收方法 ADR 与对应真机验收 issue。门禁绿

@@ -1,29 +1,44 @@
 name: CI
 
-# Pull requests and pushes to main run the same small set of jobs. There is no
-# path filter on purpose: a missed filter is a silent skip, and this repository
-# is small enough that a docs-only pull request can afford the full run.
+# Two lanes:
+#   * The fast lane runs on every push, pull request and merge-queue entry.
+#   * The heavy lane (the remaining pytest platforms and the package smoke)
+#     runs only on `merge_group` or on a pull request carrying the `full-ci`
+#     label. Add the label when a change touches cross-platform behaviour,
+#     packaging, or the Python version floor.
 #
-# There is no merge queue here. A pull request is merged directly, so the
-# workflow listens to push and pull_request only; a merge-queue trigger would
-# never fire. Concurrency therefore uses GitHub's native "cancel the superseded
-# pull-request run" behaviour instead of Tavotto's cancel-superseded job.
+# The `CI gate` job aggregates both lanes. On an ordinary pull request the
+# heavy jobs are skipped and the gate reports `deferred` (a success conclusion);
+# on `full-ci` and `merge_group` a skipped heavy job is a failure. The gate
+# script is read from the default branch so a pull request cannot supply the
+# rule that judges it; the one bootstrap exception is the pull request that
+# introduces the script.
+#
+# There is no path filter on purpose: a missed filter is a silent skip, and this
+# repository is small enough that a docs-only pull request can afford the fast
+# lane.
+#
+# The merge queue is not enabled yet: the repository is owned by a personal
+# account, and GitHub only offers merge queues to organizations. The
+# `merge_group` trigger and the gate's queue semantics are wired now so the
+# queue can be enabled later without changing the workflow shape (issue #84).
+# Concurrency is grouped by head SHA and never cancels: a required check is
+# recorded per SHA, and a cancelled gate cannot turn green afterwards.
 "on":
   push:
     branches: [main]
   pull_request:
     branches: [main]
-    # The default three. They are written out so that adding ready_for_review
-    # or labeled/unlabeled in the future is a visible edit: those types exist
-    # in Tavotto to drive full-ci and tiered CI, neither of which this
-    # repository has.
-    types: [opened, synchronize, reopened]
+    # `labeled`/`unlabeled` drive `full-ci`. GitHub cannot filter pull_request
+    # events by label name, so every label change re-runs the fast lane. That is
+    # accepted: the heavy jobs are still skipped unless `full-ci` is present.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  merge_group:
+    types: [checks_requested]
 
-# One run per pull request (or ref). A newer push cancels the run it replaces;
-# main runs are never cancelled because each is the only record for that commit.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+  cancel-in-progress: false
 
 # The workflow only reads the repository and produces throwaway artifacts.
 # Jobs that need more declare it locally.
@@ -40,12 +55,6 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-
-      # The lessons book is plain Markdown parsed by a stdlib-only script, so
-      # this check needs no dependencies. It runs once here instead of in the
-      # pytest matrix; tests/test_lessons_format.py anchors the parser itself.
-      - name: Check lessons format
-        run: python scripts/check_lessons.py
 
       # The ruff version has one source of truth: requirements-dev.txt pins it
       # exactly. pyproject.toml carries the matching range for pip users and
@@ -89,52 +98,20 @@ jobs:
       - name: Ruff check
         run: ruff check --output-format github .
 
+  # The fast pytest leg. The remaining platform/version legs live in
+  # `pytest-platforms` below and run only on full-ci or merge_group.
   pytest:
     name: pytest (${{ matrix.python }}, ${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-24.04
-            python: "3.10"
-          - os: ubuntu-24.04
             python: "3.13"
-          - os: windows-latest
-            python: "3.13"
-    env:
-      # The suite stores and reads non-ASCII paths and text. Force UTF-8 mode
-      # so Windows does not depend on the runner's active code page.
-      PYTHONUTF8: "1"
-      PYTHONIOENCODING: utf-8
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python }}
-          cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
-            pyproject.toml
-
-      - name: Install dependencies
-        shell: bash
-        env:
-          PIP_DEFAULT_TIMEOUT: "30"
-          PIP_RETRIES: "5"
-        run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
-
-      # pyproject.toml declares the `network` and `model` markers, and the
-      # suite must stay offline in CI: there are no model files or network
-      # credentials on a hosted runner. A test that needs either resource must
-      # carry the marker and skip cleanly when it is unavailable.
-      - name: Run the offline test suite
-        run: python -m pytest -m "not network and not model" -rs --durations=10
+    uses: ./.github/workflows/_pytest.yml
+    with:
+      os: ${{ matrix.os }}
+      python: ${{ matrix.python }}
 
   frontend-tests:
     name: frontend-tests (${{ matrix.os }})
@@ -247,14 +224,15 @@ jobs:
   # touches a Zotero binary in CI: `zotero-plugin build` does not read
   # binPath/profilePath, so no Zotero install is needed here.
   #
-  # Same matrix shape as frontend-tests and pytest. esbuild ships one
-  # platform-specific native binary per runner OS, so building on both legs
-  # verifies the committed package-lock.json resolves on both. littrace is
-  # developed on Windows (the primary and only verified platform), so
-  # windows-latest is the load-bearing leg; ubuntu is the cross-check.
+  # Same two-OS matrix as frontend-tests; the Python matrix's other legs live
+  # in pytest-platforms. esbuild ships one platform-specific native binary per
+  # runner OS, so building on both legs verifies the committed package-lock.json
+  # resolves on both. littrace is developed on Windows (the primary and only
+  # verified platform), so windows-latest is the load-bearing leg; ubuntu is the
+  # cross-check.
   #
-  # No npm cache: the plugin dependency tree is two dev packages, far below
-  # the size where cache setup pays for itself.
+  # No npm cache: the plugin dependency tree is two dev packages, far below the
+  # size where cache setup pays for itself.
   plugin-build:
     name: plugin-build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -288,6 +266,10 @@ jobs:
   # checks out the pull request: the tree under review must not supply the rule
   # that judges it.
   #
+  # It runs on pull requests and on merge-queue entries. On merge_group the
+  # script reports `not_applicable` and exits 0: the grouped commits already
+  # passed the pull-request check.
+  #
   # The base..head range is read through the compare API (three-dot, so it uses
   # the merge base) with pagination; a full-history checkout would only add
   # time. A range that resolves to zero commits is a failure, not a silent
@@ -295,7 +277,7 @@ jobs:
   # fails closed.
   dco:
     name: dco
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -346,3 +328,77 @@ jobs:
       - name: Lint workflows
         run: |
           "$RUNNER_TEMP/actionlint" -shellcheck= .github/workflows/*.yml
+
+  # Heavy lane: the remaining pytest platform/version legs. They are skipped on
+  # an ordinary pull request; the gate below turns that into `deferred`.
+  pytest-platforms:
+    name: pytest-platforms (${{ matrix.python }}, ${{ matrix.os }})
+    if: ${{ github.event_name == 'merge_group' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            python: "3.10"
+          - os: windows-latest
+            python: "3.13"
+    uses: ./.github/workflows/_pytest.yml
+    with:
+      os: ${{ matrix.os }}
+      python: ${{ matrix.python }}
+
+  # Heavy lane: the built distribution. Shared with the nightly workflow.
+  package-smoke:
+    name: package-smoke
+    if: ${{ github.event_name == 'merge_group' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
+    uses: ./.github/workflows/_package-smoke.yml
+
+  # The stable required context. `always()` makes it run when an upstream job
+  # failed or was skipped; the script decides whether that is a pass, a
+  # deferred pass, or a failure. The judge comes from the default branch so the
+  # pull request cannot rewrite the rule that judges it. The one exception is
+  # the bootstrap pull request that introduces the script.
+  ci-gate:
+    name: CI gate
+    if: always()
+    needs: [python-lint, pytest, frontend-tests, plugin-build, dco, actionlint, pytest-platforms, package-smoke]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Choose the judge
+        id: judge
+        run: |
+          set -euo pipefail
+          if [ -s trusted/scripts/ci/aggregate_gate.py ]; then
+            echo "path=trusted/scripts/ci/aggregate_gate.py" >> "$GITHUB_OUTPUT"
+          else
+            # bootstrap: the pull request that introduces the gate cannot find
+            # it on the default branch yet. This window exists only for that PR.
+            echo "path=scripts/ci/aggregate_gate.py" >> "$GITHUB_OUTPUT"
+            echo "::notice::default branch does not have aggregate_gate.py yet (bootstrap); using this revision's copy"
+          fi
+      - name: Aggregate the gate
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          # `unlabeled` still counts as full-ci so removing the label cannot
+          # launder a heavy-lane failure into a deferred pass.
+          GATE_FULL_CI: ${{ github.event_name == 'pull_request' && (contains(github.event.pull_request.labels.*.name, 'full-ci') || (github.event.action == 'unlabeled' && github.event.label.name == 'full-ci')) }}
+        run: |
+          python -I "${{ steps.judge.outputs.path }}" \
+            --gate ci \
+            --event "${{ github.event_name }}" \
+            --needs-json "$NEEDS_JSON" \
+            --full-ci "$GATE_FULL_CI"
