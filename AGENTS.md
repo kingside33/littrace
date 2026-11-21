@@ -32,6 +32,15 @@ git diff origin/main...HEAD --stat
   行内评论(line comments)发表**,不散落在 PR 正文或会话记录里。实现员逐条
   修复、在对应线程回复处理说明并 resolve;合并前所有评审线程必须 resolved,
   由集成管理员复核。
+- **评审会话规程。** 评审会话(与实现无共享上下文的独立会话)只评审、不改
+  码:不 commit、不 push、不 resolve 评审线程。评审前先核对本地 worktree
+  head 与 `gh pr view --json headRefOid` 一致,不一致立即停。发现以行内评论
+  发表,带 `[P0]`/`[P1]`/`[P2]` 前缀与 path:line 证据,行号落在 diff 右侧
+  新增行内。裁决只有两种:有发现发 `--request-changes`,零发现发
+  `--approve`(仍列出查过什么);评审正文只写计数与结论,绝不写发现内容,
+  并实测 `gh pr checks`。评审账号是 PR 作者时 GitHub 拒绝这两种类型,降级为
+  `--comment` 提交同样结论并注明原因(完整规程见 CONTRIBUTING.md「Independent
+  review pass」)。
 - **提交纪律。** `git commit -s`(DCO 硬门禁,CI 读 `Signed-off-by` trailer);
   不加 Co-Authored-By 尾注;提交信息用 `type(scope): 中文标题`。squash 合并
   时确认 trailer 保留(CONTRIBUTING.md「Pull requests」节的「Merge method」小节)。
