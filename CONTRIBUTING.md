@@ -363,6 +363,33 @@ python -m pytest -m "not network and not model"
 node --test tests/test_*.cjs
 ```
 
+### Independent review pass
+
+Every pull request gets one full review by an independent session — one that
+did not implement the change. The reviewer session may be an AI session,
+including a subagent session dispatched by automated orchestration. The
+reviewer session reviews only and does not write code: no commits, no
+pushes, no resolving of review threads.
+
+Before reviewing, verify that the local worktree head matches the
+`headRefOid` reported by `gh pr view --json headRefOid`; stop immediately if
+it does not. Findings are posted as pull-request line comments, each
+prefixed `[P0]` / `[P1]` / `[P2]`, with `path:line` evidence; the line
+number must fall inside the added lines on the right side of the diff
+(context-only issues point at the nearest diff line and say where the real
+location is). The verdict is one of two: `--request-changes` when there are
+findings, `--approve` when there are none (still list what was checked).
+The review body carries only the counts and the verdict, never the findings
+themselves. Run `gh pr checks` yourself; a green claim in the description
+is not a substitute.
+
+GitHub rejects `request-changes` and `approve` submitted by the pull
+request's own author account. When the only available account is the
+author's, submit the same verdict as a plain comment review and state why
+the formal review type was unavailable. The implementer still resolves the
+thread after fixing, and the integration admin re-checks before merge, as
+described in AGENTS.md.
+
 ### Merge method
 
 The default is a merge commit or rebase-and-merge. Both keep the original
