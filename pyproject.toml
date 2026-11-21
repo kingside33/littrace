@@ -8,6 +8,9 @@ build-backend = "setuptools.build_meta"
 name = "littrace"
 version = "0.1.0"
 description = "本地文献知识库：全文精读、证据检索与研究工作台"
+# twine check --strict treats an empty long_description as a failure. The .md
+# suffix makes setuptools derive long_description_content_type=text/markdown.
+readme = "README.md"
 # SPDX 标识；仓库根的 LICENSE 是 AGPL-3.0-only 全文。
 license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
