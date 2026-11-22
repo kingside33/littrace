@@ -2,7 +2,7 @@
 import json
 import sqlite3
 from contextlib import closing
-VERSION = 11
+VERSION = 12
 DDL = """
 CREATE TABLE IF NOT EXISTS agent_units(
  id TEXT PRIMARY KEY, parent_id TEXT NOT NULL REFERENCES agent_tasks(id),run_id TEXT NOT NULL REFERENCES agent_runs(id),
@@ -79,6 +79,14 @@ CREATE TABLE IF NOT EXISTS citation_contexts(id TEXT PRIMARY KEY,reference_id TE
 CREATE TABLE IF NOT EXISTS model_runs(id TEXT PRIMARY KEY,role TEXT NOT NULL,signature TEXT NOT NULL,status TEXT NOT NULL,
  payload TEXT NOT NULL,started TEXT NOT NULL,finished TEXT);
 CREATE TABLE IF NOT EXISTS document_reviews(id TEXT PRIMARY KEY,document_id TEXT NOT NULL REFERENCES documents(id),page INTEGER NOT NULL,payload TEXT NOT NULL,created TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS quota_events(
+ id TEXT PRIMARY KEY,
+ day TEXT NOT NULL,
+ kind TEXT NOT NULL,
+ subject TEXT NOT NULL,
+ tier TEXT NOT NULL,
+ created TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS quota_event_day ON quota_events(day, kind);
 """
 # Revisions are transactionally updated even when workflows use direct SQL writes.
 for _table, _key in [('papers','paper_revision'),('paper_classifications','paper_revision'),('works','paper_revision'),('paper_works','paper_revision'),('work_versions','paper_revision'),('document_references','source_revision'),('citation_contexts','source_revision'),('documents','source_revision'),('document_pages','source_revision'),('document_chunks','source_revision'),('document_blocks','source_revision'),('relations','relation_revision')]:

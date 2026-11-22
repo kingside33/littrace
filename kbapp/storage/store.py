@@ -92,6 +92,26 @@ class Store:
         with self.db() as db:
             db.execute('INSERT OR REPLACE INTO state VALUES(?,?)', (key, json.dumps(value, ensure_ascii=False)))
 
+    def quota_count(self, day, kind='analysis_task'):
+        """当日某类配额事件的数量；只计数，不做准入判定。"""
+        with self.db() as db:
+            row = db.execute('SELECT COUNT(*) FROM quota_events WHERE day=? AND kind=?', (day, kind)).fetchone()
+        return int(row[0])
+
+    def quota_record(self, day, kind, subject, tier):
+        """记账一条配额事件；确定性 id + INSERT OR IGNORE 保证同键幂等。
+
+        返回本次是否真的插入。这里不做 count-then-insert 的准入事务，
+        也不抛 QuotaExceeded——执行配额属于后续切片。
+        """
+        if tier not in ('free', 'pro'):
+            raise ValueError('授权层级只能是 free 或 pro')
+        from kbapp.core.quota import event_id
+        with self.db() as db:
+            cursor = db.execute('INSERT OR IGNORE INTO quota_events(id,day,kind,subject,tier,created) VALUES(?,?,?,?,?,?)',
+                                (event_id(day, kind, subject), day, kind, subject, tier, now()))
+        return cursor.rowcount > 0
+
     def apply_cache_dir(self):
         """Point `paths.cache` at the configured directory, if any.
 
