@@ -98,7 +98,12 @@ class ReviewLock(unittest.TestCase):
         self.assertEqual(len(attempts), 3)
 
     def test_request_lock_permission_error_is_bounded_by_queue_busy_cap(self):
-        """持续 PermissionError 在上限处转成「队列忙」的可续跑错误。"""
+        """持续 PermissionError 在 180 秒上限处转成「队列忙」的可续跑错误。
+
+        attempts 计数与 FakeTime 终值把「180 秒」钉进断言（PR #123 评审）：
+        上限改小会因尝试次数不足 1801 转红；上限检查被删会触发 FakeTime
+        安全阀转红，而不是无限自旋挂死。
+        """
         attempts = []
 
         class BusyLock:
@@ -110,17 +115,26 @@ class ReviewLock(unittest.TestCase):
                 return False
 
         class FakeTime:
-            value = 0.0
+            def __init__(self):
+                self.value = 0.0
 
             def monotonic(self):
                 return self.value
 
             def sleep(self, seconds):
                 self.value += seconds
+                if self.value > 1000:
+                    raise AssertionError('上限检查未生效：重试循环未在 180 秒处停止')
 
+        fake_time = FakeTime()
         with mock.patch.object(locks, 'update_lock', lambda root, filename: BusyLock()), \
-                mock.patch.object(review, 'time', FakeTime()):
+                mock.patch.object(review, 'time', fake_time):
             with self.assertRaisesRegex(ValueError, '核验请求队列仍忙'):
                 with request_lock(self.store_stub(), 'busy-key', lambda: False):
                     pass
-        self.assertGreater(len(attempts), 1)
+        # 获取循环「先检查上限、再睡眠」：180 上限时浮点累加落在 1801~1802 次
+        # 尝试、终值约 180.1。任何更小的上限（如 0、90）都到不了 1801 次。
+        self.assertGreaterEqual(len(attempts), 1801)
+        self.assertLessEqual(len(attempts), 1802)
+        self.assertGreater(fake_time.value, 180)
+        self.assertLess(fake_time.value, 180.5)
