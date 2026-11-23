@@ -208,9 +208,9 @@ When a Zotero plugin ships, it will get its own plugin × Zotero version matrix.
 
 | Stage | Direction | Layer |
 |---|---|---|
-| **Now** | Stabilize the open core and its documentation. Existing open-source capabilities stay complete and are not moved into a paid tier. | Open |
+| **Now** | Stabilize the open core and its documentation. Existing open-source capabilities stay complete and usable under the published free limits; the paid tier lifts those limits and adds capabilities that are not in the core. | Open |
 | **Next** | Zotero plugin. Form and scope are undecided; the first step is a feasibility prototype in the public repository. No feature list is promised. | Open |
-| **Later** | Commercial layer. The paid shape and pay points are undecided; the principles are in [Business model](#business-model). | Commercial |
+| **Later** | Commercial layer. The paid shape is a Pro entitlement that lifts the free limits plus separate commercial-layer capabilities; prices and terms are published and versioned. | Commercial |
 
 The table has no dates on purpose. A date would turn a direction into a promise.
 
@@ -224,16 +224,16 @@ littrace is a local-first literature toolkit. The core is open source under AGPL
 
 ### Paid forms
 
-The paid feature set is not decided yet. This section describes principles, not a price list.
+The paid surface has one decided shape (below). This section describes principles, not a price list.
 
-1. Advanced features in the future Zotero plugin — scope to be announced.
+1. A Pro entitlement: removes the free limits above and enables the separate commercial layer.
 2. Hosted service subscription — scope to be announced.
 3. Institutional dual licensing — scope to be announced.
 
 ### Principles
 
-- **(a) No paywall on existing open source.** Existing open-source features are never moved behind a paywall. A paid capability must be additive.
-- **(b) Local first stays free where possible.** Cloud-side, collaboration and scale capabilities are the natural paid surface.
+- **(a) Existing capabilities stay available, under published limits.** Every capability that ships in the open-source core remains usable without a paid licence, and nothing is removed from the AGPL-3.0-only source. What the free tier limits is scale: one analysis run takes at most 20 papers as its starting set, expands at most 10 first-level neighbours per paper (the works it cites, the works citing it, and other directly related works), and allows a fixed number of analysis tasks per day. A Pro entitlement lifts those limits, and it also enables the separate commercial layer, whose capabilities are not part of this repository. This replaces the earlier wording, which said existing features would never be metered. Limits are always visible before they bite: a request over the per-run paper limit is refused with the exact number before any work starts, and neighbours skipped by the per-paper limit are reported in the run's own result — never silently dropped into a result that looks complete. The limits are ordinary code in an AGPL-3.0-only program, so anyone may build littrace without them; we do not obfuscate the core and we do not pretend these limits are unbreakable. The published limits are in [`docs/commercial/limits.md`](docs/commercial/limits.md); that file is the single source of truth and is versioned.
+- **(b) Local-first capabilities are usable within the free limits; the limits are about scale, see principle (a).** Cloud-side, collaboration and scale capabilities are the natural paid surface.
 - **(c) Clear boundaries.** Commercial code and the AGPL-3.0-only core keep a clear repository and process boundary. A commercial license never reduces anyone's rights under AGPL-3.0-only.
 - **(d) Published terms.** Prices, terms, and what is and is not included are published and versioned.
 - **(e) Contributors.** Contributors are credited as described in the contribution terms. Contributions are accepted with a DCO sign-off; the separate terms covering attribution and use in commercial versions are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
