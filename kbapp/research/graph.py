@@ -95,10 +95,11 @@ def _graph_lock(store):
 
 
 def _catalog_key(store):
+    from kbapp.library.cards import title_rules_digest
     with store.db() as db:
         methods = [tuple(r) for r in db.execute('SELECT id,name,aliases,payload,updated FROM method_concepts ORDER BY id')]
         mappings = [tuple(r) for r in db.execute('SELECT paper_id,method_id FROM paper_methods ORDER BY paper_id,method_id')]
-    return (taxonomy.VERSION, store.state('paper_revision', 0), digest(json.dumps([methods, mappings], ensure_ascii=False)))
+    return (taxonomy.VERSION, store.state('paper_revision', 0), digest(json.dumps([methods, mappings], ensure_ascii=False)), title_rules_digest())
 
 
 def _summary_key(store):

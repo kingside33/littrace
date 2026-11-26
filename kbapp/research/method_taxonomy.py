@@ -60,13 +60,15 @@ def concept_families(row):
 def annotate(papers, concepts, direction='', prior=None, records=None):
     """为全部文献计算展示归类，具体算法ID仍可用于旧链接和精确筛选。"""
     by_method = {row['id']: concept_families(row) for row in concepts}
-    from kbapp.library.cards import KEYWORD_RULES
+    from kbapp.library.cards import KEYWORD_RULES, title_rules_digest
+    from kbapp.core.markers import PROJECT, STAGES
     from kbapp.core.io import digest
+    rules_digest = title_rules_digest()
     for paper in papers.values():
         raw = list(dict.fromkeys(paper.get('methods') or []))
         classification = paper.get('classification') or {}
         manual = classification.get('manual') or classification.get('automatic') is False or paper.get('direction_assignment') == 'manual'
-        fingerprint = digest(json.dumps([VERSION, direction, paper.get('title'), [(mid, by_method.get(mid)) for mid in raw],
+        fingerprint = digest(json.dumps([VERSION, rules_digest, direction, paper.get('title'), [(mid, by_method.get(mid)) for mid in raw],
                                          paper.get('directions'), bool(manual)], ensure_ascii=False))
         saved = (prior or {}).get(paper.get('id'))
         if saved and saved.get('fingerprint') == fingerprint:
@@ -85,15 +87,25 @@ def annotate(papers, concepts, direction='', prior=None, records=None):
         paper['method_family_scores'] = dict(votes)
         paper['primary_method_family'] = primary
         paper['methods'] = list(dict.fromkeys(raw + memberships))
-        # 外部文献通常没有已保存的方向：题名规则只补充展示，明确保留依据。
-        if not paper.get('directions') and not manual:
+        # 题名规则只补充展示，并明确保留依据。入库时的规则摘要与当前不一致时，
+        # 由题名推断（含落 90 兜底）来的方向按当前规则重算，并同步由 directions
+        # 派生的展示字段（issue #100 要求 3）；人工归类与合集/磁盘来源不参与。
+        inferred_basis = paper.get('direction_basis') in ('title_keywords', 'fallback')
+        stale = inferred_basis and paper.get('direction_rules_digest') != rules_digest
+        if (not paper.get('directions') or stale) and not manual:
             inferred = sorted({d for pattern, directions in KEYWORD_RULES
                                if re.search(pattern, paper.get('title', ''), re.I) for d in directions})
             paper['directions'] = inferred
+            paper['primary_direction'] = (inferred or ['90'])[0]
+            paper['project'] = PROJECT if any((d in STAGES for d in inferred)) else ''
+            paper['project_stages'] = [STAGES[d] for d in inferred if d in STAGES]
             if inferred:
                 paper['direction_basis'] = 'title_keywords'
+            else:
+                paper['direction_basis'] = 'fallback'
+            paper['direction_rules_digest'] = rules_digest
         if records is not None:
-            fields = ('method_families', 'method_family_scores', 'primary_method_family', 'methods', 'directions', 'direction_basis')
+            fields = ('method_families', 'method_family_scores', 'primary_method_family', 'methods', 'directions', 'direction_basis', 'direction_rules_digest')
             records[paper['id']] = {'fingerprint': fingerprint, 'fields': {k: paper[k] for k in fields if k in paper}}
     return papers
 

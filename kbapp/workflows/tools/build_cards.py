@@ -4,7 +4,7 @@ import json
 import os
 import sys
 from collections import Counter
-from kbapp.library.cards import BASE, DIR_NAME, base_stem, build_ctx, default_figures_block, extract_figure_block, extract_manual_fm, extract_persist, first_sentence, load_citation_maps, load_figures, load_template, make_citekey, merge_duplicate_records, norm_text, parse_filename, pick_directions, render, render_citations, tag_fields, write_papers_all
+from kbapp.library.cards import BASE, DIR_NAME, title_rules_digest, base_stem, build_ctx, default_figures_block, extract_figure_block, extract_manual_fm, extract_persist, first_sentence, load_citation_maps, load_figures, load_template, make_citekey, merge_duplicate_records, norm_text, parse_filename, pick_directions_with_basis, render, render_citations, tag_fields, write_papers_all
 
 def main(argv=None):
     try:
@@ -60,7 +60,9 @@ def main(argv=None):
             pdf_loc, pdf_ok = ('zotero-storage', True)
         tf, other = tag_fields(p.get('tags') or [])
         authors = p.get('authors') or []
-        records.append({'zotero_key': p['key'], 'title': p.get('title') or '', 'authors': authors, 'year': p.get('year'), 'venue': p.get('venue') or '', 'doi': p.get('doi') or '', 'abstract': p.get('abstract') or '', 'directions': pick_directions(p, rel or ''), 'tagfields': tf, 'other_tags': other, 'metadata_source': 'zotero', 'pdf': pdf_path, 'pdf_location': pdf_loc, 'pdf_exists': pdf_ok, 'item_type': p.get('type'), 'collections': [c['path'] for c in p.get('collections') or []]})
+        dirs, basis = pick_directions_with_basis(p, rel or '')
+        digest_now = title_rules_digest()
+        records.append({'zotero_key': p['key'], 'title': p.get('title') or '', 'authors': authors, 'year': p.get('year'), 'venue': p.get('venue') or '', 'doi': p.get('doi') or '', 'abstract': p.get('abstract') or '', 'directions': dirs, 'direction_basis': basis, 'direction_rules_digest': digest_now, 'tagfields': tf, 'other_tags': other, 'metadata_source': 'zotero', 'pdf': pdf_path, 'pdf_location': pdf_loc, 'pdf_exists': pdf_ok, 'item_type': p.get('type'), 'collections': [c['path'] for c in p.get('collections') or []]})
     rel_to_paper = {v: k for k, v in paper_pdf.items()}
     by_qh = {}
     for p in pdfs:
@@ -119,7 +121,9 @@ def main(argv=None):
             source = 'filename'
         if isinstance(year, str) and year.isdigit():
             year = int(year)
-        records.append({'zotero_key': None, 'title': title, 'authors': authors, 'year': year, 'venue': enrich.get('venue') or '', 'doi': enrich.get('doi') or '', 'abstract': enrich.get('abstract') or '', 'directions': pick_directions({'title': title, 'collections': []}, o['rel']), 'tagfields': {}, 'other_tags': [], 'metadata_source': source, 'pdf': o['rel'], 'pdf_location': 'vault', 'pdf_exists': True, 'item_type': enrich.get('type') or None, 'collections': [], 'filename_parsed': parsed['parsed']})
+        dirs, basis = pick_directions_with_basis({'title': title, 'collections': []}, o['rel'])
+        digest_now = title_rules_digest()
+        records.append({'zotero_key': None, 'title': title, 'authors': authors, 'year': year, 'venue': enrich.get('venue') or '', 'doi': enrich.get('doi') or '', 'abstract': enrich.get('abstract') or '', 'directions': dirs, 'direction_basis': basis, 'direction_rules_digest': digest_now, 'tagfields': {}, 'other_tags': [], 'metadata_source': source, 'pdf': o['rel'], 'pdf_location': 'vault', 'pdf_exists': True, 'item_type': enrich.get('type') or None, 'collections': [], 'filename_parsed': parsed['parsed']})
     before = len(records)
     records, merged_dups = merge_duplicate_records(records)
     from kbapp.core.io import jsonl
@@ -173,7 +177,7 @@ def main(argv=None):
         json.dump(manifest, fh, ensure_ascii=False, indent=2)
     with open(os.path.join(index_dir, 'papers_all.jsonl'), 'w', encoding='utf-8') as fh:
         for r in records:
-            fh.write(json.dumps({'citekey': r['citekey'], 'zotero_key': r['zotero_key'], 'title': r['title'], 'authors': r['authors'], 'year': r['year'], 'venue': r['venue'], 'doi': r['doi'], 'abstract': r['abstract'], 'tldr': r['tldr'], 'directions': r['directions'], 'primary_direction': r['primary_direction'], 'tags': sorted([f'{k}:{v}' for k, vs in r['tagfields'].items() for v in vs] + r['other_tags']), 'metadata_source': r['metadata_source'], 'pdf': r['pdf'], 'pdf_exists': r['pdf_exists'], 'collections': r['collections'], 'tagfields': {k: sorted(set(v)) for k, v in r['tagfields'].items()}, 'card': manifest[r['citekey']]['path']}, ensure_ascii=False) + '\n')
+            fh.write(json.dumps({'citekey': r['citekey'], 'zotero_key': r['zotero_key'], 'title': r['title'], 'authors': r['authors'], 'year': r['year'], 'venue': r['venue'], 'doi': r['doi'], 'abstract': r['abstract'], 'tldr': r['tldr'], 'directions': r['directions'], 'primary_direction': r['primary_direction'], 'direction_basis': r.get('direction_basis'), 'direction_rules_digest': r.get('direction_rules_digest'), 'tags': sorted([f'{k}:{v}' for k, vs in r['tagfields'].items() for v in vs] + r['other_tags']), 'metadata_source': r['metadata_source'], 'pdf': r['pdf'], 'pdf_exists': r['pdf_exists'], 'collections': r['collections'], 'tagfields': {k: sorted(set(v)) for k, v in r['tagfields'].items()}, 'card': manifest[r['citekey']]['path']}, ensure_ascii=False) + '\n')
     by_dir = Counter((r['primary_direction'] for r in records))
     stats = {'cards_total': len(records), 'from_zotero': sum((1 for r in records if r['metadata_source'] == 'zotero')), 'from_old_zotero': sum((1 for r in records if r['metadata_source'] == 'old-zotero')), 'from_filename': sum((1 for r in records if r['metadata_source'] == 'filename')), 'duplicate_pdfs_skipped': len(duplicates), 'duplicate_records_merged': len(merged_dups), 'records_before_merge': before, 'stale_cards_removed': removed, 'with_abstract': sum((1 for r in records if r['abstract'])), 'by_direction': {DIR_NAME[k]: v for k, v in sorted(by_dir.items())}, 'filename_unparsed': sum((1 for r in records if r['metadata_source'] == 'filename' and (not r.get('filename_parsed'))))}
     with open(os.path.join(index_dir, 'cards_stats.json'), 'w', encoding='utf-8') as fh:
