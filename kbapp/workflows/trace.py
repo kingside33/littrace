@@ -59,7 +59,7 @@ ERROR_CLASSES = (
     ('OpenAlex HTTP ', 'network_wait'),
     ('请在网页配置 OpenAlex key', 'awaiting_key'),
     # 已存但读不出的 key 与「没配 key」是两种原因、两种动作：前者要重填，
-    # 后者才需要去申请。前缀与 store.SECRET_ADVICE 的文案一一对应。
+    # 后者才需要去申请。前缀与 store.KEY_UNUSABLE_HINT 的文案一一对应。
     ('已保存的 OpenAlex key 无法读取', 'awaiting_key'),
     ('本平台无法读取保存的密钥', 'awaiting_key'),
 )

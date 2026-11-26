@@ -368,6 +368,25 @@ class PlatformWithoutProtector(CiphertextCase):
 class OpenAlexKeyAdvice(CiphertextCase):
     """存了但读不出的 OpenAlex key 不能报成「没配 key」。"""
 
+    def test_fetch_prints_a_fixed_hint_never_a_settings_derived_string(self):
+        """CLI 侧的日志文案是常量，不由解密路径上的值拼出来（CodeQL 明文泄露）。"""
+        import io
+        from contextlib import redirect_stdout
+
+        from kbapp.workflows.tools import fetch_openalex
+
+        self.write_settings({'openalex_key': BLOB})
+        buffer = io.StringIO()
+        with patch.object(fetch_openalex, 'get_api_key', return_value=''), \
+                patch.object(fetch_openalex, '_curl_json', return_value={'meta': {}}), \
+                patch.object(fetch_openalex, 'key_state', return_value='unreadable'), \
+                redirect_stdout(buffer):
+            fetch_openalex._query('/tmp', 'filter=doi:10.1/x', 'id')
+        logged = buffer.getvalue()
+        self.assertIn('已保存的 OpenAlex key 无法读取', logged)
+        # 日志里既不能有密文，也不能有明文密钥。
+        self.assertNotIn(BLOB, logged)
+
     def test_openalex_refuses_with_retype_advice_not_apply_advice(self):
         from kbapp.integrations.openalex import OpenAlex
 

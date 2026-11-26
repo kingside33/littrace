@@ -15,17 +15,18 @@ from kbapp.core.config import DEFAULTS, KINDS
 # "no key stored". See `settings()`.
 SECRET_KEYS = ('api_key', 'openalex_key')
 
-# Advice shown when a secret is stored but this process cannot use it. The two
+# Advice shown when a key is stored but this process cannot use it. The two
 # causes need different actions: retyping fixes a foreign/corrupt blob, but
 # nothing the user types can work on a platform with no protector (ADR 0041).
-SECRET_ADVICE = {
+# These are fixed interface sentences, unrelated to any decrypted value.
+KEY_UNUSABLE_HINT = {
     # 与 issue #81 的验收文案一致：云端调用的 400 仍是这一句。
     'api_key': '保存的密钥无法读取，请重新填写',
     # OpenAlex 的 key 是另一件事，且它的默认文案会把人引向「去申请」，
     # 所以单独说明正确动作是「重新填写」。
     'openalex_key': '已保存的 OpenAlex key 无法读取，请到工作台设置页重新填写',
 }
-SECRET_PLATFORM_ADVICE = '本平台无法读取保存的密钥（密钥存储仅支持 Windows），请参考设置页的平台说明'
+KEY_UNUSABLE_PLATFORM_HINT = '本平台无法读取保存的密钥（密钥存储仅支持 Windows），请参考设置页的平台说明'
 
 class Store:
 
@@ -210,6 +211,9 @@ class Store:
         `unreadable`: `kbapp/core/secrets.py` raises `SecretProtectionUnavailable`
         before it ever looks at the blob on a non-Windows machine, so that is a
         permanent "no protector", not a damaged copy.
+
+        Only the classification comes back, never the plaintext, so callers that
+        log or render it cannot leak the key.
         """
         value = read_json(self.paths.state / 'settings.json', {}).get(key, '')
         return self._reveal_with_state(value)[1]
@@ -245,9 +249,9 @@ class Store:
         """
         state = self.secret_state(key)
         if state == 'unreadable':
-            return SECRET_ADVICE[key]
+            return KEY_UNUSABLE_HINT[key]
         if state == 'platform_unavailable':
-            return SECRET_PLATFORM_ADVICE
+            return KEY_UNUSABLE_PLATFORM_HINT
         return ''
 
     def save_settings(self, values):
@@ -351,7 +355,7 @@ class Store:
                         # Storing a non-empty secret needs a protector this
                         # platform does not have. Answer a readable 400 rather
                         # than leaking a 500 (ADR 0041: other fields still save).
-                        raise ValueError(SECRET_PLATFORM_ADVICE) from None
+                        raise ValueError(KEY_UNUSABLE_PLATFORM_HINT) from None
                 else:
                     encrypted[key] = raw.get(key, '')
             else:

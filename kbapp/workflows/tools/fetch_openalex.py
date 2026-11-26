@@ -125,11 +125,11 @@ def _query(base, params, select, per_page=50, timeout=45, quiet=False):
             print(f'    [key 未生效，本次改用无 key 请求] {str(exc)[:100]}', flush=True)
             data = _curl_json(f'{API}/works?{params}{tail}', timeout=timeout, quiet=quiet)
     else:
-        notice = key_unreadable()
-        if notice and not quiet:
-            # 不是「没配」：告诉用户存着的 key 读不出，动作是重填。仍会发无 key
-            # 请求（额度更低），但绝不静默把它当成「没配 key」。
-            print(f'    [{notice}] 本次改用无 key 请求', flush=True)
+        if key_state() in ('unreadable', 'platform_unavailable') and not quiet:
+            # 不是「没配」：告诉用户存着的 key 读不出，动作是重填。文案是本文件
+            # 的常量，不拼接任何来自 settings.json 的值（CodeQL 的明文泄露查询
+            # 会追踪解密路径上的字符串；这里只按状态取固定句）。
+            print('    [已保存的 OpenAlex key 无法读取，请重新填写] 本次改用无 key 请求', flush=True)
         data = _curl_json(f'{API}/works?{params}{tail}', timeout=timeout, quiet=quiet)
     meta = data.get('meta') or {}
     cost = float(meta.get('cost_usd') or 0.0)
@@ -144,16 +144,17 @@ def get_api_key():
     legacy = store.paths.state / 'legacy-openalex.key'
     return legacy.read_text(encoding='utf-8').strip() if legacy.exists() else ''
 
-def key_unreadable():
-    """已保存但读不出时的说明；可用或未配置返回空串。
+def key_state():
+    """Stored OpenAlex key state: 'ok' / 'absent' / 'unreadable' / 'platform_unavailable'.
 
-    不把「读不出」当「没配」：退到无 key 请求仍能跑（$0.10/天），但额度更低，
-    用户需要知道正确动作是重填而不是重新申请。
+    Only the state crosses this boundary, never the key or anything derived from
+    its ciphertext: the callers print a fixed sentence per state, so no secret
+    (or decrypt-path value) can reach a log.
     """
     from kbapp.storage.store import Store
     if os.environ.get('OPENALEX_API_KEY', '').strip():
-        return ''
-    return Store().secret_advice('openalex_key')
+        return 'ok'
+    return Store().secret_state('openalex_key')
 
 def _key_paths():
     from kbapp.core.paths import Paths
@@ -410,10 +411,13 @@ def fetch_citers(base, min_lib=2, max_cited=6000, per_page=100):
 def probe(base):
     print('== OpenAlex 探测 ==', flush=True)
     key = get_api_key()
-    if key:
+    # 只按状态选固定文案，不把来自 settings.json 的字符串拼进 print：CodeQL 的
+    # clear-text-logging 查询会追踪解密路径上的值。
+    state = 'ok' if key else ('unreadable' if key_state() in ('unreadable', 'platform_unavailable') else 'absent')
+    if state == 'ok':
         status = '已配置（$1/天）'
-    elif key_unreadable():
-        status = f'{key_unreadable()}（本次 $0.10/天）'
+    elif state == 'unreadable':
+        status = '已保存但无法读取，请重新填写（本次 $0.10/天）'
     else:
         status = '未配置（$0.10/天，按 IP 共享）'
     print(f'API key: {status}', flush=True)
