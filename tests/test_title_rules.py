@@ -1,11 +1,48 @@
 """题名方向归类规则：三态配置、双语义（卡片第一条命中/谱系汇总）、人工保护与缓存自动失效。"""
 import os
+import sqlite3
 import tempfile
 import unittest
-from kbapp.core.io import read_json
+from kbapp.core.io import atomic, read_json
 from kbapp.library import cards
+from kbapp.library.sources import sync_library
 from kbapp.research import graph, method_taxonomy as taxonomy
 from kbapp.storage.store import Store
+
+
+def _zotero_fixture(zdir):
+    """最小 Zotero 库快照：一篇有标题与年份的期刊论文，供真实 sync_library 读取。"""
+    db = sqlite3.connect(os.path.join(str(zdir), 'zotero.sqlite'))
+    db.executescript("""
+CREATE TABLE items(itemID INTEGER PRIMARY KEY, key TEXT, itemTypeID INTEGER, dateAdded TEXT, dateModified TEXT, libraryID INTEGER, version INTEGER, clientDateModified TEXT);
+CREATE TABLE deletedItems(itemID INTEGER);
+CREATE TABLE itemTypesCombined(itemTypeID INTEGER PRIMARY KEY, typeName TEXT);
+CREATE TABLE fieldsCombined(fieldID INTEGER PRIMARY KEY, fieldName TEXT);
+CREATE TABLE itemDataValues(valueID INTEGER PRIMARY KEY, value TEXT);
+CREATE TABLE itemData(itemID INTEGER, fieldID INTEGER, valueID INTEGER);
+CREATE TABLE creators(creatorID INTEGER PRIMARY KEY, firstName TEXT, lastName TEXT, fieldMode INTEGER);
+CREATE TABLE creatorTypes(creatorTypeID INTEGER PRIMARY KEY, creatorType TEXT);
+CREATE TABLE itemCreators(itemID INTEGER, orderIndex INTEGER, creatorTypeID INTEGER, creatorID INTEGER);
+CREATE TABLE tags(tagID INTEGER PRIMARY KEY, name TEXT);
+CREATE TABLE itemTags(itemID INTEGER, tagID INTEGER, type INTEGER);
+CREATE TABLE collections(collectionID INTEGER PRIMARY KEY, collectionName TEXT, parentCollectionID INTEGER, libraryID INTEGER, key TEXT, version INTEGER);
+CREATE TABLE deletedCollections(collectionID INTEGER);
+CREATE TABLE collectionItems(collectionID INTEGER, itemID INTEGER);
+CREATE TABLE itemAttachments(itemID INTEGER PRIMARY KEY, parentItemID INTEGER, linkMode INTEGER, contentType TEXT, path TEXT);
+""")
+    db.execute("INSERT INTO itemTypesCombined VALUES(2,'journalArticle')")
+    db.execute("INSERT INTO fieldsCombined VALUES(1,'title')")
+    db.execute("INSERT INTO fieldsCombined VALUES(2,'date')")
+    db.execute("INSERT INTO itemDataValues VALUES(1,'冷原子干涉仪的量子传感应用')")
+    db.execute("INSERT INTO itemDataValues VALUES(2,'2021-05-01')")
+    db.execute("INSERT INTO items VALUES(1,'AAAABBBBCCCCDDDD',2,'2021-05-02','2021-05-02',1,10,'2021-05-02')")
+    db.execute("INSERT INTO itemData VALUES(1,1,1)")
+    db.execute("INSERT INTO itemData VALUES(1,2,2)")
+    db.execute("INSERT INTO creators VALUES(1,'San','Zhang',0)")
+    db.execute("INSERT INTO creatorTypes VALUES(1,'author')")
+    db.execute("INSERT INTO itemCreators VALUES(1,0,1,1)")
+    db.commit()
+    db.close()
 
 
 class TitleRuleValidation(unittest.TestCase):
@@ -257,6 +294,47 @@ class RuleChangeCacheInvalidation(unittest.TestCase):
                          (['90'], 'fallback'))
         self.assertEqual(cards.pick_directions({'title': '冷原子干涉仪', 'collections': []}, ''), ['01'])
         self.assertEqual(cards.pick_directions({'title': '无关键词题名', 'collections': []}, ''), ['90'])
+
+    def test_sync_library_ingests_new_paper_without_prior_record(self):
+        # 端到端锚定真实入库路径(PR #106 复核 P0):新文献 prev 为空时 r 里没有 directions,
+        # 赋值顺序颠倒会在 sources.sync_library 抛 KeyError,update 整体中断。
+        store = Store(self.temp.name)
+        zdir = os.path.join(self.temp.name, 'zotero')
+        os.makedirs(zdir)
+        _zotero_fixture(zdir)
+        base = os.path.join(self.temp.name, 'base')
+        os.makedirs(base)
+        atomic(store.paths.state / 'settings.json', {'zotero_dir': zdir})
+        cards.KEYWORD_RULES = [('冷原子', ['01'])]
+        papers, _, _ = sync_library(store, os.path.join(base, '_index'))
+        self.assertEqual(len(papers), 1)
+        paper = papers[0]
+        self.assertEqual(paper['directions'], ['01'])
+        self.assertEqual(paper['primary_direction'], '01')
+        self.assertEqual(paper['direction_basis'], 'title_keywords')
+        self.assertEqual(paper['direction_rules_digest'], cards.title_rules_digest())
+        # 增量入库同一篇:不抛错且沿用同一来源标记
+        again, _, _ = sync_library(store, os.path.join(base, '_index'))
+        self.assertEqual(again[0]['directions'], ['01'])
+        self.assertEqual(again[0]['primary_direction'], '01')
+
+    def test_sync_library_keeps_manual_direction_assignment(self):
+        # 人工指定的方向不被入库覆盖;即使没有 directions 键也不能在 primary_direction 上抛错。
+        store = Store(self.temp.name)
+        zdir = os.path.join(self.temp.name, 'zotero')
+        os.makedirs(zdir)
+        _zotero_fixture(zdir)
+        base = os.path.join(self.temp.name, 'base')
+        os.makedirs(base)
+        atomic(store.paths.state / 'settings.json', {'zotero_dir': zdir})
+        cards.KEYWORD_RULES = [('冷原子', ['01'])]
+        # 先入库一次,再标记为人工改向,再增量入库
+        papers, _, _ = sync_library(store, os.path.join(base, '_index'))
+        manual = dict(papers[0], direction_assignment='manual', directions=['08'], primary_direction='08')
+        store.put_papers([dict(manual, kind='library')])
+        again, _, _ = sync_library(store, os.path.join(base, '_index'))
+        self.assertEqual(again[0]['directions'], ['08'])
+        self.assertEqual(again[0]['primary_direction'], '08')
 
 
 if __name__ == '__main__':
