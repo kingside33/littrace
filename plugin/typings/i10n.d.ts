@@ -160,6 +160,8 @@ export type FluentMessageId =
   | 'prefs-probe-detail'
   | 'prefs-probe-dns'
   | 'prefs-probe-http'
+  | 'prefs-probe-key-platform-unsupported'
+  | 'prefs-probe-key-unreadable'
   | 'prefs-probe-not-configured'
   | 'prefs-probe-ok'
   | 'prefs-probe-proxy-fallback'

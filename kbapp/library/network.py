@@ -53,34 +53,53 @@ def ensure_research_metadata(store, paper):
             return updated
         return dict(paper, abstract_scope='unavailable' if not paper.get('abstract') else 'cached_excerpt')
     needs = not paper.get('abstract') or (paper.get('abstract_scope') in {'cached', 'cached_excerpt'} and len(paper.get('abstract', '')) <= 420)
-    if needs and wid and store.settings().get('openalex_key'):
-        try:
-            from kbapp.core.execution import research_run
-            budget_key = 'metadata-budget:' + research_run.get() + ':' + now()[:10]
-            with store.db() as db:
-                db.execute('BEGIN IMMEDIATE')
-                row = db.execute('SELECT value FROM state WHERE key=?', (budget_key,)).fetchone()
-                used = json.loads(row[0]) if row else 0
-                if used >= store.settings()['external_requests_per_run']:
-                    raise ValueError('本轮元数据请求上限已到')
-                db.execute('INSERT OR REPLACE INTO state VALUES(?,?)', (budget_key, json.dumps(used + 1)))
-            data = map_work(OpenAlex(store).get('works/' + wid))
-            atomic(cached, {'paper': data, 'updated': now()})
-            updated = dict(paper)
-            for field in ('abstract', 'doi', 'authors', 'refs', 'venue', 'oa_url', 'oa_landing_url'):
-                if data.get(field) and (not updated.get(field) or field == 'abstract') and (not (field == 'abstract' and paper.get('abstract_manual'))):
-                    updated[field] = data[field]
-            updated['abstract_scope'] = 'openalex_full' if data.get('abstract') else 'unavailable'
-            store.put_papers([updated])
-            return updated
-        except Exception:
-            return dict(paper, abstract_scope='cached_excerpt' if paper.get('abstract') else 'unavailable')
+    if needs and wid:
+        # `settings()` 把「存了但解不开」表示成 None。若这里只按假值判断，
+        # 那个状态会与「没配 key」走同一条路落到下面的兜底，于是整条谱系识别
+        # 阶段拿不到摘要、也不留任何说明——把显式失败换成了静默半功能。
+        # 所以两态分开：没配照旧安静降级（本来就没有可用动作），读不出则在
+        # 返回值上带原因，并在状态里留一条，供设置页/状态页引导「重新填写」。
+        key_state = store.secret_state('openalex_key')
+        if key_state in ('unreadable', 'platform_unavailable'):
+            message = store.secret_advice('openalex_key')
+            store.set_state('openalex_key_unusable', {'reason': key_state, 'message': message, 'at': now()})
+            return dict(paper, abstract_scope='key_unreadable',
+                        abstract_scope_reason=message)
+        if key_state == 'ok':
+            try:
+                from kbapp.core.execution import research_run
+                budget_key = 'metadata-budget:' + research_run.get() + ':' + now()[:10]
+                with store.db() as db:
+                    db.execute('BEGIN IMMEDIATE')
+                    row = db.execute('SELECT value FROM state WHERE key=?', (budget_key,)).fetchone()
+                    used = json.loads(row[0]) if row else 0
+                    if used >= store.settings()['external_requests_per_run']:
+                        raise ValueError('本轮元数据请求上限已到')
+                    db.execute('INSERT OR REPLACE INTO state VALUES(?,?)', (budget_key, json.dumps(used + 1)))
+                data = map_work(OpenAlex(store).get('works/' + wid))
+                atomic(cached, {'paper': data, 'updated': now()})
+                updated = dict(paper)
+                for field in ('abstract', 'doi', 'authors', 'refs', 'venue', 'oa_url', 'oa_landing_url'):
+                    if data.get(field) and (not updated.get(field) or field == 'abstract') and (not (field == 'abstract' and paper.get('abstract_manual'))):
+                        updated[field] = data[field]
+                updated['abstract_scope'] = 'openalex_full' if data.get('abstract') else 'unavailable'
+                store.put_papers([updated])
+                return updated
+            except Exception:
+                return dict(paper, abstract_scope='cached_excerpt' if paper.get('abstract') else 'unavailable')
     return dict(paper, abstract_scope='cached_excerpt' if needs and paper.get('abstract') else paper.get('abstract_scope', 'unavailable'))
 
 def expand(store, progress=lambda x: None):
     client = OpenAlex(store)
     if not client.cfg['openalex_key']:
-        return {'state': 'awaiting_openalex_key', 'requests': 0}
+        # Two causes, two messages: "no key yet" and "a key is stored but this
+        # process cannot read it". Both stop the run, but the second one must
+        # not tell the user to go apply for a key they already have.
+        if client.cfg['openalex_key'] is None:
+            return {'state': 'awaiting_openalex_key', 'reason': 'unreadable',
+                    'message': store.secret_advice('openalex_key'), 'requests': 0}
+        return {'state': 'awaiting_openalex_key', 'reason': 'absent',
+                'message': '', 'requests': 0}
     with store.db() as db:
         db.execute("UPDATE frontier SET status='pending',cursor='*' WHERE status='complete' AND direction='downstream' AND updated<?", (time.strftime('%Y-%m-%d', time.gmtime(time.time() - 7 * 86400)),))
     papers = store.papers()
