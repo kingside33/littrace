@@ -5,7 +5,7 @@ import json
 import os
 BASE = str(Paths.from_base().base)
 KINDS = {'cites', 'inherits', 'improves', 'combines', 'transfers', 'compares', 'similar', 'parallel', 'contradicts'}
-DEFAULTS = {'api_base': '', 'cloud_proxy': '', 'model': '', 'api_key': '', 'openalex_key': '', 'input_price': 0.0, 'output_price': 0.0, 'daily_budget': 0.0, 'cloud_enabled': False, 'daily_time': '09:00', 'network_depth': 2, 'budget_mode': 'limited', 'external_requests_per_run': 100, 'cloud_requests_per_run': 12, 'ocr_pages_per_run': 30, 'ocr_regions_per_run': 30, 'local_text_model': 'gemma4:e4b', 'local_text_context': 4096, 'relation_extractor': 'cloud', 'zotero_dir': os.environ.get('KB_ZOTERO_DIR', ''), 'cache_dir': os.environ.get('KB_CACHE_DIR', ''), 'port': 8765}
+DEFAULTS = {'api_base': '', 'cloud_proxy': '', 'model': '', 'api_key': '', 'openalex_key': '', 'input_price': 0.0, 'output_price': 0.0, 'daily_budget': 0.0, 'cloud_enabled': False, 'daily_time': '09:00', 'network_depth': 2, 'network_depth_unlimited': False, 'budget_mode': 'limited', 'external_requests_per_run': 100, 'cloud_requests_per_run': 12, 'ocr_pages_per_run': 30, 'ocr_regions_per_run': 30, 'local_text_model': 'gemma4:e4b', 'local_text_context': 4096, 'relation_extractor': 'cloud', 'zotero_dir': os.environ.get('KB_ZOTERO_DIR', ''), 'cache_dir': os.environ.get('KB_CACHE_DIR', ''), 'port': 8765}
 BASE = str(Paths.from_base().base)
 LIT_DIR = '_知识库/10_文献'
 DIR_DIR = '_知识库/20_方向'

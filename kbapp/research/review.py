@@ -109,7 +109,11 @@ def request_lock(store, key, should_stop):
         try:
             lock.__enter__()
             break
-        except ValueError:
+        except (ValueError, PermissionError):
+            # ValueError：锁已被占用。PermissionError：Windows 上锁文件打开等
+            # 瞬时共享冲突（外部句柄短暂占用，issue #97 在 CI 与本地压测中均有
+            # 出现）。数据目录真正不可写时 Store 构造阶段就会失败，走不到评审
+            # 路径，因此这里一律按「忙」重试，由 180 秒上限与 should_stop 兜底。
             if time.monotonic() - started > 180:
                 raise ValueError('核验请求队列仍忙，可续跑')
             time.sleep(0.1)

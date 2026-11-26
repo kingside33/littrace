@@ -183,6 +183,7 @@ jobs:
             tests/test_reliability_graph.cjs
             tests/test_role_bubbles.cjs
             tests/test_search.cjs
+            tests/test_settings_depth.cjs
             tests/test_task_entry.cjs
         run: |
           node - <<'JS'
@@ -239,6 +240,7 @@ jobs:
             tests/test_reliability_graph.cjs \
             tests/test_role_bubbles.cjs \
             tests/test_search.cjs \
+            tests/test_settings_depth.cjs \
             tests/test_task_entry.cjs
 
   # The plugin builds with zotero-plugin-scaffold (esbuild + zip) and never
