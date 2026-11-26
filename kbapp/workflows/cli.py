@@ -53,7 +53,7 @@ def parser():
     data.add_argument('action', choices=['plan', 'migrate', 'rollback', 'tool'])
     data.add_argument('options', nargs=argparse.REMAINDER, help='tool 后为工具名称和选项')
     doctor = commands.add_parser('doctor', help='状态、架构及回归验证')
-    doctor.add_argument('action', choices=['status', 'architecture', 'tests', 'integrity', 'relations', 'retrieval', 'consistency'], default='status', nargs='?')
+    doctor.add_argument('action', choices=['status', 'architecture', 'tests', 'integrity', 'relations', 'retrieval', 'consistency', 'attachments'], default='status', nargs='?')
     doctor.add_argument('options', nargs=argparse.REMAINDER)
     backup = commands.add_parser('backup', help='创建 SQLite 一致性备份')
     backup.add_argument('--keep', type=int, default=7, help='保留最近 N 份自动备份')
@@ -136,7 +136,7 @@ def main(argv=None):
         from kbapp.storage.store import Store
         output(check(Store(paths.base, data_dir=paths.data)))
         return 0
-    if args.command == 'doctor' and args.action in {'architecture', 'tests', 'integrity', 'relations', 'retrieval'}:
+    if args.command == 'doctor' and args.action in {'architecture', 'tests', 'integrity', 'relations', 'retrieval', 'attachments'}:
         from kbapp.workflows.diagnostics import run
         return run(args.action, args.options, paths)
     if args.command=='research' and args.action=='repair' and not args.apply:
