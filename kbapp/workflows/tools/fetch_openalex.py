@@ -125,6 +125,11 @@ def _query(base, params, select, per_page=50, timeout=45, quiet=False):
             print(f'    [key 未生效，本次改用无 key 请求] {str(exc)[:100]}', flush=True)
             data = _curl_json(f'{API}/works?{params}{tail}', timeout=timeout, quiet=quiet)
     else:
+        notice = key_unreadable()
+        if notice and not quiet:
+            # 不是「没配」：告诉用户存着的 key 读不出，动作是重填。仍会发无 key
+            # 请求（额度更低），但绝不静默把它当成「没配 key」。
+            print(f'    [{notice}] 本次改用无 key 请求', flush=True)
         data = _curl_json(f'{API}/works?{params}{tail}', timeout=timeout, quiet=quiet)
     meta = data.get('meta') or {}
     cost = float(meta.get('cost_usd') or 0.0)
@@ -138,6 +143,17 @@ def get_api_key():
         return key
     legacy = store.paths.state / 'legacy-openalex.key'
     return legacy.read_text(encoding='utf-8').strip() if legacy.exists() else ''
+
+def key_unreadable():
+    """已保存但读不出时的说明；可用或未配置返回空串。
+
+    不把「读不出」当「没配」：退到无 key 请求仍能跑（$0.10/天），但额度更低，
+    用户需要知道正确动作是重填而不是重新申请。
+    """
+    from kbapp.storage.store import Store
+    if os.environ.get('OPENALEX_API_KEY', '').strip():
+        return ''
+    return Store().secret_advice('openalex_key')
 
 def _key_paths():
     from kbapp.core.paths import Paths
@@ -394,7 +410,13 @@ def fetch_citers(base, min_lib=2, max_cited=6000, per_page=100):
 def probe(base):
     print('== OpenAlex 探测 ==', flush=True)
     key = get_api_key()
-    print(f"API key: {('已配置（$1/天）' if key else '未配置（$0.10/天，按 IP 共享）')}", flush=True)
+    if key:
+        status = '已配置（$1/天）'
+    elif key_unreadable():
+        status = f'{key_unreadable()}（本次 $0.10/天）'
+    else:
+        status = '未配置（$0.10/天，按 IP 共享）'
+    print(f'API key: {status}', flush=True)
     t0 = time.time()
     data, cost = _query(base, 'filter=doi:10.1109/tssc.1968.300136', SELECT_BASE, per_page=1)
     dt = time.time() - t0

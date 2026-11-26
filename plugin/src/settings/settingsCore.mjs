@@ -340,6 +340,7 @@ export const TEST_CODES = Object.freeze({
   AUTH: "auth",
   REDIRECT_REFUSED: "redirect_refused",
   PROBE_UNSUPPORTED: "probe_unsupported",
+  KEY_UNREADABLE: "key_unreadable",
   HTTP: "http",
 });
 
@@ -355,6 +356,7 @@ export const TEST_CODE_KEYS = Object.freeze({
   auth: "prefs-probe-auth",
   redirect_refused: "prefs-probe-redirect-refused",
   probe_unsupported: "prefs-probe-unsupported",
+  key_unreadable: "prefs-probe-key-unreadable",
   http: "prefs-probe-http",
 });
 

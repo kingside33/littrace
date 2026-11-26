@@ -5,7 +5,7 @@ import json
 import sqlite3
 import time
 from datetime import datetime
-from kbapp.core.secrets import protect
+from kbapp.core.secrets import SecretDecryptError, SecretProtectionUnavailable, protect
 from kbapp.core.io import TZ, atomic, digest, now, read_json
 from kbapp.core.config import DEFAULTS, KINDS
 
@@ -14,6 +14,18 @@ from kbapp.core.config import DEFAULTS, KINDS
 # be undecryptable, which is a state callers must be able to tell apart from
 # "no key stored". See `settings()`.
 SECRET_KEYS = ('api_key', 'openalex_key')
+
+# Advice shown when a secret is stored but this process cannot use it. The two
+# causes need different actions: retyping fixes a foreign/corrupt blob, but
+# nothing the user types can work on a platform with no protector (ADR 0041).
+SECRET_ADVICE = {
+    # 与 issue #81 的验收文案一致：云端调用的 400 仍是这一句。
+    'api_key': '保存的密钥无法读取，请重新填写',
+    # OpenAlex 的 key 是另一件事，且它的默认文案会把人引向「去申请」，
+    # 所以单独说明正确动作是「重新填写」。
+    'openalex_key': '已保存的 OpenAlex key 无法读取，请到工作台设置页重新填写',
+}
+SECRET_PLATFORM_ADVICE = '本平台无法读取保存的密钥（密钥存储仅支持 Windows），请参考设置页的平台说明'
 
 class Store:
 
@@ -160,31 +172,83 @@ class Store:
         (nothing stored) and from plaintext. `None` is falsy, so callers that
         only ask "is there a usable key?" keep working.
 
-        The public view (booleans only) still reports `True`, because a secret
-        *is* stored; `save_settings` never needs to reveal it to decide what to
-        do with an untouched key (it writes the stored bytes back verbatim).
+        Two *different* reasons collapse into that `None`, and callers that
+        must word the advice correctly read `secret_state()` instead:
+
+        - `unreadable` — the blob was written by another Windows user; retyping
+          the key recovers it;
+        - `platform_unavailable` — this platform ships no protector (ADR 0041);
+          retyping cannot help here.
+
+        The public view (booleans only) still reports `True` for a stored
+        secret, because one *is* stored, and adds `secrets_unavailable` naming
+        the reason per key so the interface does not show a green "saved, cloud
+        enabled" for a key no call can use.
         """
         result = dict(DEFAULTS)
         data = read_json(self.paths.state / 'settings.json', {})
+        unavailable = {}
         for key, value in data.items():
             if key in SECRET_KEYS:
-                result[key] = bool(value) if public else self._reveal(value)
+                revealed, state = self._reveal_with_state(value)
+                result[key] = bool(value) if public else revealed
+                if state in ('unreadable', 'platform_unavailable'):
+                    unavailable[key] = state
             elif key in DEFAULTS:
                 result[key] = value
         if public:
             for key in SECRET_KEYS:
                 result[key] = bool(result[key])
+            if unavailable:
+                result['secrets_unavailable'] = unavailable
         return result
 
+    def secret_state(self, key):
+        """Classify one stored secret: absent / ok / unreadable / platform_unavailable.
+
+        Platform capability is deliberately its own state, not folded into
+        `unreadable`: `kbapp/core/secrets.py` raises `SecretProtectionUnavailable`
+        before it ever looks at the blob on a non-Windows machine, so that is a
+        permanent "no protector", not a damaged copy.
+        """
+        value = read_json(self.paths.state / 'settings.json', {}).get(key, '')
+        return self._reveal_with_state(value)[1]
+
     @staticmethod
-    def _reveal(value):
-        """Decrypt one stored secret; `None` means stored but unreadable."""
+    def _reveal_with_state(value):
+        """Decrypt one stored secret → `(plaintext_or_None, state)`.
+
+        `state` is one of `absent` (nothing stored), `ok`, `unreadable`
+        (foreign/corrupt ciphertext) or `platform_unavailable` (no protector).
+        Only the latter two make the plaintext `None`; `absent` maps to `''`
+        so callers that ask "is there a usable key?" keep the old behaviour.
+        """
         if not value:
-            return ''
+            return '', 'absent'
         try:
-            return protect(value, decrypt=True)
-        except Exception:  # DPAPI/base64 failures are environmental, not caller errors
-            return None
+            return protect(value, decrypt=True), 'ok'
+        except SecretProtectionUnavailable:
+            # No protector on this platform. Not an exception to throw at callers
+            # that just read settings (that would re-lock every save, the state
+            # #81 exists to remove); `secret_state()` names it for the advice.
+            return None, 'platform_unavailable'
+        except (SecretDecryptError, ValueError):
+            # ValueError covers binascii.Error from a non-base64 blob.
+            return None, 'unreadable'
+
+    def secret_advice(self, key):
+        """Readable, actionable sentence for a secret that is stored but unusable.
+
+        Empty string when the secret is usable (or absent): callers only have a
+        problem to explain when `secret_state()` is `unreadable` or
+        `platform_unavailable`.
+        """
+        state = self.secret_state(key)
+        if state == 'unreadable':
+            return SECRET_ADVICE[key]
+        if state == 'platform_unavailable':
+            return SECRET_PLATFORM_ADVICE
+        return ''
 
     def save_settings(self, values):
         from urllib.parse import urlparse
@@ -264,8 +328,11 @@ class Store:
             if not all((current[k] for k in ('api_base', 'model'))):
                 raise ValueError('启用前需填写 API、模型与密钥')
             if current['api_key'] is None:
+                # `secret_state()` splits the two causes so the 400 says
+                # "retype the key" for a foreign/corrupt blob and "this platform
+                # cannot hold a key" (ADR 0041) where retyping is futile.
                 if not was_cloud_enabled and values.get('cloud_enabled') is True:
-                    raise ValueError('保存的密钥无法读取，请重新填写')
+                    raise ValueError(self.secret_advice('api_key'))
             elif not current['api_key']:
                 raise ValueError('启用前需填写 API、模型与密钥')
             if current['budget_mode'] == 'limited' and (not all((current[k] for k in ('daily_budget', 'input_price', 'output_price')))):
@@ -277,7 +344,16 @@ class Store:
                 # encrypted fresh, without ever opening the old ciphertext.
                 # An untouched key is written back exactly as stored: decrypt
                 # + re-encrypt would fail outright when the blob is unreadable.
-                encrypted[key] = protect(value) if key in values and values[key] is not None else raw.get(key, '')
+                if key in values and values[key] is not None:
+                    try:
+                        encrypted[key] = protect(value)
+                    except SecretProtectionUnavailable:
+                        # Storing a non-empty secret needs a protector this
+                        # platform does not have. Answer a readable 400 rather
+                        # than leaking a 500 (ADR 0041: other fields still save).
+                        raise ValueError(SECRET_PLATFORM_ADVICE) from None
+                else:
+                    encrypted[key] = raw.get(key, '')
             else:
                 encrypted[key] = value
         atomic(self.paths.state / 'settings.json', encrypted)

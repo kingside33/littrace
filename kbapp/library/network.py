@@ -80,7 +80,14 @@ def ensure_research_metadata(store, paper):
 def expand(store, progress=lambda x: None):
     client = OpenAlex(store)
     if not client.cfg['openalex_key']:
-        return {'state': 'awaiting_openalex_key', 'requests': 0}
+        # Two causes, two messages: "no key yet" and "a key is stored but this
+        # process cannot read it". Both stop the run, but the second one must
+        # not tell the user to go apply for a key they already have.
+        if client.cfg['openalex_key'] is None:
+            return {'state': 'awaiting_openalex_key', 'reason': 'unreadable',
+                    'message': store.secret_advice('openalex_key'), 'requests': 0}
+        return {'state': 'awaiting_openalex_key', 'reason': 'absent',
+                'message': '', 'requests': 0}
     with store.db() as db:
         db.execute("UPDATE frontier SET status='pending',cursor='*' WHERE status='complete' AND direction='downstream' AND updated<?", (time.strftime('%Y-%m-%d', time.gmtime(time.time() - 7 * 86400)),))
     papers = store.papers()

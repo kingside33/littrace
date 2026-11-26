@@ -304,6 +304,7 @@ prefs-probe-timeout = The connection or the answer timed out
 prefs-probe-auth = The credentials were rejected; check the API key
 prefs-probe-redirect-refused = The endpoint asked to redirect elsewhere, which was refused
 prefs-probe-unsupported = Reachable, but the endpoint serves no /models, so it cannot be verified automatically
+prefs-probe-key-unreadable = The saved key cannot be read, so no probe was sent; enter the key again
 prefs-probe-http = The endpoint answered with an error status
 prefs-platform-cloud-unsupported = Cloud settings need Windows
 prefs-platform-cloud-unsupported-desc = The service protects the key with Windows DPAPI, so these controls stay disabled here. See docs/support-matrix.json for the platform scope.

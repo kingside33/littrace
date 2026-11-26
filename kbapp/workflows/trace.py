@@ -58,6 +58,10 @@ ERROR_CLASSES = (
     ('OpenAlex HTTP 404', 'missing_source'),
     ('OpenAlex HTTP ', 'network_wait'),
     ('请在网页配置 OpenAlex key', 'awaiting_key'),
+    # 已存但读不出的 key 与「没配 key」是两种原因、两种动作：前者要重填，
+    # 后者才需要去申请。前缀与 store.SECRET_ADVICE 的文案一一对应。
+    ('已保存的 OpenAlex key 无法读取', 'awaiting_key'),
+    ('本平台无法读取保存的密钥', 'awaiting_key'),
 )
 ROUND_STATES = {'complete': 'complete', 'paused': 'paused', 'budget_wait': 'awaiting_budget',
                 'network_wait': 'deferred', 'awaiting_key': 'awaiting_key'}
@@ -214,7 +218,10 @@ def _run_rounds(store, task_id):
     """
     client = OpenAlex(store)
     if not client.cfg['openalex_key']:
-        _finish_run(store, task_id, 'awaiting_key', '', 0)
+        # `None` means a key is stored but this process cannot open it; its own
+        # sentence says "retype it", which is the action that actually helps.
+        # `''` means nothing is stored and the hint correctly points at applying.
+        _finish_run(store, task_id, 'awaiting_key', client.key_message(), 0)
         return task_snapshot(store, task_id)
     with store.db() as db:
         db.execute("UPDATE trace_tasks SET status='running',pid=?,error='',updated=? WHERE id=?",

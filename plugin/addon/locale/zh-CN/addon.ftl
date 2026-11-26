@@ -300,6 +300,7 @@ prefs-probe-timeout = 连接或响应超时
 prefs-probe-auth = 鉴权被拒绝,请检查 API 密钥
 prefs-probe-redirect-refused = 端点要求跳转到其他地址,已拒绝跟随
 prefs-probe-unsupported = 端点可达,但未提供 /models,无法自动验证
+prefs-probe-key-unreadable = 保存的密钥无法读取,未发起探测;请重新填写密钥
 prefs-probe-http = 端点返回了异常状态
 prefs-platform-cloud-unsupported = 云端设置需要 Windows
 prefs-platform-cloud-unsupported-desc = 服务用 Windows DPAPI 保护密钥,因此这些控件在此平台保持禁用。平台口径以 docs/support-matrix.json 为唯一出处。

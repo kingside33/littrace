@@ -15,7 +15,7 @@ DPAPI 密文绑定写入它的 Windows 用户；数据目录搬迁、备份还�
 """
 
 import base64
-import binascii
+import itertools
 import json
 import os
 import sys
@@ -31,7 +31,8 @@ os.environ['KB_NO_REFERENCE_WORKER'] = '1'
 from fastapi.testclient import TestClient  # noqa: E402
 
 from kbapp.core.io import atomic  # noqa: E402
-from kbapp.integrations.cloud import complete  # noqa: E402
+from kbapp.core.secrets import SecretDecryptError, SecretProtectionUnavailable  # noqa: E402
+from kbapp.integrations.cloud import complete, probe_models  # noqa: E402
 from kbapp.storage.store import Store  # noqa: E402
 from support import service_for  # noqa: E402
 
@@ -39,19 +40,34 @@ from support import service_for  # noqa: E402
 # binascii.Error: Incorrect padding。
 BLOB = 'not-a-dpapi-blob'
 PREFIX = 'dpapi:'
+# 每次加密产出的密文都不同，模拟真实 CryptProtectData 的随机性。确定性替身会
+# 让「原样写回」与「解密再重加密」产出同一字符串，那条断言就成了恒真
+# （lessons L-002）。
+_encrypt_counter = itertools.count(1)
 
 
 def fake_dpapi(text, decrypt=False):
-    """DPAPI 替身：可解的密文带 PREFIX，BLOB 模拟别的 Windows 用户写的密文。"""
+    """DPAPI 替身：密文 = PREFIX + 序号 + ':' + base64(明文)。
+
+    序号让每次加密都不同，`BLOB` 模拟别的 Windows 用户写的密文（抛
+    SecretDecryptError，与真实 provider 同一异常类别）。
+    """
     if not text:
         return ''
     if not decrypt:
-        return PREFIX + base64.b64encode(text.encode('utf-8')).decode('ascii')
+        return PREFIX + str(next(_encrypt_counter)) + ':' + base64.b64encode(text.encode('utf-8')).decode('ascii')
     if text == BLOB:
-        raise binascii.Error('Incorrect padding')
+        raise SecretDecryptError('Windows 密钥保护失败')
     if isinstance(text, str) and text.startswith(PREFIX):
-        return base64.b64decode(text[len(PREFIX):]).decode('utf-8')
-    raise RuntimeError('Windows 密钥保护失败')
+        return base64.b64decode(text[len(PREFIX):].split(':', 1)[1]).decode('utf-8')
+    raise SecretDecryptError('Windows 密钥保护失败')
+
+
+def no_protector(text, decrypt=False):
+    """非 Windows 的真实行为：任何非空值都抛「本平台没有保护器」。"""
+    if not text:
+        return ''
+    raise SecretProtectionUnavailable('密钥保护仅支持当前 Windows 用户，其他平台需配置密钥存储适配器')
 
 
 class CiphertextCase(unittest.TestCase):
@@ -217,7 +233,9 @@ class SuppliedSecret(CiphertextCase):
         self.assertIs(response.json()['api_key'], True)
         self.assertEqual(self.store.settings()['api_key'], 'sk-new')
         raw = self.read_raw()
-        self.assertEqual(raw['api_key'], PREFIX + base64.b64encode(b'sk-new').decode('ascii'))
+        # 新值被重新加密（不是原样保存明文），且旧密文已被覆盖。
+        self.assertTrue(raw['api_key'].startswith(PREFIX))
+        self.assertNotEqual(raw['api_key'], BLOB)
         self.assertNotIn('sk-new', raw['api_key'])
 
     def test_clearing_to_empty_overwrites_without_decrypting(self):
@@ -282,6 +300,115 @@ class CloudConsumerGuard(CiphertextCase):
         # 拒绝发生在 reserve 之前：没有 reserved 用量行，也就不会计入当日额度。
         with self.store.db() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM usage').fetchone()[0], 0)
+
+
+class ProbeUnreadableKey(CiphertextCase):
+    """探测不得把「读不出」当成「没配」：不发请求，也不谎报「鉴权被接受」。"""
+
+    def test_probe_reports_key_unreadable_without_sending_a_request(self):
+        self.write_settings({'api_base': 'https://api.example.org/v1', 'api_key': BLOB})
+        with patch('kbapp.integrations.cloud.build_opener') as factory, patch(
+            'kbapp.integrations.cloud.urlopen'
+        ) as direct:
+            result = probe_models(self.store)
+        # 没有发起任何请求：不把键当空串发一个无鉴权头的探测。
+        factory.assert_not_called()
+        direct.assert_not_called()
+        self.assertEqual(result['code'], 'key_unreadable')
+        self.assertEqual(result['verdict'], 'failed')
+        # 也不能误导成「鉴权被拒绝 / 密钥写错了」。
+        self.assertNotIn('鉴权被接受', result['summary'])
+
+    def test_probe_code_is_in_the_closed_vocabulary(self):
+        from kbapp.integrations.cloud import PROBE_CODES
+
+        self.assertIn('key_unreadable', PROBE_CODES)
+
+
+class PlatformWithoutProtector(CiphertextCase):
+    """非 Windows：没有保护器是「能力缺失」，不是「密文损坏」。"""
+
+    def setUp(self):
+        super().setUp()
+        # 用真实 secrets.py 在非 Windows 上的行为替换本文件的 DPAPI 替身。
+        patcher = patch('kbapp.storage.store.protect', no_protector)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_settings_do_not_raise_and_classify_the_cause(self):
+        self.write_settings({'api_key': 'anything'})
+        # 读侧不抛（否则每次保存都会被重新锁死），但原因与「密文损坏」分开。
+        self.assertIsNone(self.store.settings()['api_key'])
+        self.assertEqual(self.store.secret_state('api_key'), 'platform_unavailable')
+        self.assertIn('Windows', self.store.secret_advice('api_key'))
+
+    def test_public_view_flags_the_unavailable_secret(self):
+        self.write_settings({'api_key': 'anything', 'cloud_enabled': True})
+        public = self.store.settings(public=True)
+        self.assertIs(public['api_key'], True)
+        self.assertEqual(public['secrets_unavailable'], {'api_key': 'platform_unavailable'})
+        # 摘要据此不再是一盏「已启用」的绿灯。
+        response = self.client.get('/api/settings')
+        body = response.json()
+        self.assertEqual(body['secrets_unavailable']['api_key'], 'platform_unavailable')
+
+    def test_saving_a_new_key_is_a_readable_400_not_a_500(self):
+        response = self.post({'api_key': 'sk-new'})
+        self.assertEqual(response.status_code, 400, response.text)
+        detail = response.json()['detail']
+        self.assertIn('Windows', detail)
+        self.assertNotIn('RuntimeError', detail)
+
+    def test_unrelated_fields_still_save(self):
+        response = self.post({'model': 'new-model'})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['model'], 'new-model')
+
+
+class OpenAlexKeyAdvice(CiphertextCase):
+    """存了但读不出的 OpenAlex key 不能报成「没配 key」。"""
+
+    def test_openalex_refuses_with_retype_advice_not_apply_advice(self):
+        from kbapp.integrations.openalex import OpenAlex
+
+        self.write_settings({'openalex_key': BLOB})
+        client = OpenAlex(self.store)
+        with self.assertRaises(ValueError) as caught:
+            client.get('works/W1')
+        message = str(caught.exception)
+        self.assertIn('重新填写', message)
+        # 默认文案会把人引向「去配置/申请一个 key」，正确动作是重填。
+        self.assertNotIn('请在网页配置 OpenAlex key', message)
+
+    def test_trace_task_stops_with_the_retype_advice_in_its_error(self):
+        """端到端：追溯停在 awaiting_key 时，任务行的 error 说的是「重填」而非「没配」。"""
+        from kbapp.workflows.trace import run_task, start_task
+
+        self.store.put_papers([{'id': 'p1', 'kind': 'library', 'title': 'Seed',
+                                'openalex_id': 'W1', 'citekey': 'Seed'}])
+        # 直接写坏密文：save_settings 会拒绝写读不出的 key，所以落原始文件。
+        self.write_settings({'openalex_key': BLOB})
+        tid = start_task(self.store, 'p1', depth=1)['id']
+        snapshot = run_task(self.store, tid)
+        self.assertEqual(snapshot['status'], 'awaiting_key')
+        self.assertIn('重新填写', snapshot['error'])
+        self.assertNotIn('缺少 OpenAlex key', snapshot['error'])
+    def test_trace_stop_text_names_the_retype_action(self):
+        from kbapp.workflows.trace import classify
+
+        self.write_settings({'openalex_key': BLOB})
+        message = self.store.secret_advice('openalex_key')
+        self.assertIn('重新填写', message)
+        self.assertEqual(classify(ValueError(message)), 'awaiting_key')
+
+    def test_network_expand_reports_reason(self):
+        from kbapp.library.network import expand
+
+        self.write_settings({'openalex_key': BLOB})
+        result = expand(self.store)
+        self.assertEqual(result['state'], 'awaiting_openalex_key')
+        self.assertEqual(result['reason'], 'unreadable')
+        self.assertIn('重新填写', result['message'])
 
 
 class NormalPath(CiphertextCase):
