@@ -90,11 +90,39 @@ class LeaseTest(unittest.TestCase):
         self.assertEqual(agents.recover_units(self.store)['taken_over'], 1)
 
     def test_heartbeat_extends_lease_while_running(self):
-        with Lease(self.store, 'u', interval=0.05):
+        interval = 0.05
+        # #88 的失败是心跳线程错过一个固定的 0.2 s 窗口。这里不再读一次就
+        # 下结论,而是在 20 × interval(封顶 1 s)里按 interval / 5 采样、数
+        # 续租次数,用绝对余量吸收 CI 的调度抖动。
+        # 下限 = 窗口 / (4 × interval):旧用例的窗口就是 4 × interval 且只
+        # 要求一次变化,等价于「4 个间隔内必须续租」;同强度换算到 20 个
+        # 间隔的窗口就是 ≥ 5 次。所以放宽的是**窗口**,不是**续租速率**:
+        # 注入 interval 实测 ~0.19 s 起判红,与旧用例同一量级(边界随负载
+        # 抖动,不是精确值)。
+        window = min(20 * interval, 1.0)
+        expected = int(window / interval)
+        required = expected // 4
+        renewals = 0
+        with Lease(self.store, 'u', interval=interval) as lease:
             first = lease_of(self.store, 'u')['lease_until']
-            time.sleep(0.2)
-            second = lease_of(self.store, 'u')['lease_until']
-            self.assertGreater(second, first)
+            previous = first
+            deadline = time.monotonic() + window
+            while time.monotonic() < deadline:
+                time.sleep(interval / 5)
+                current = lease_of(self.store, 'u')['lease_until']
+                if current != previous:
+                    renewals += 1
+                    previous = current
+            beat_alive = lease._thread.is_alive()
+            self.assertGreaterEqual(
+                renewals,
+                required,
+                f'{window:.2f}s 窗口内(interval={interval}s)按间隔应续租约 {expected} 次,'
+                f'要求至少 {required} 次,实际 {renewals} 次;心跳线程存活={beat_alive}。'
+                f'线程未存活 → 「首次异常即静默退出」(#134);线程存活但 0 次 → 心跳一次都'
+                f'没写成功;少于 {required} 次 → 续租间隔被放大。',
+            )
+            self.assertGreater(previous, first)
         self.assertIsNone(lease_of(self.store, 'u'))
 
 
