@@ -430,6 +430,33 @@ class OpenAlexKeyAdvice(CiphertextCase):
         self.assertIn('重新填写', result['message'])
 
 
+    def test_ensure_research_metadata_reports_unreadable_instead_of_degrading_silently(self):
+        """谱系识别入口：读不出时要带重填提示，不能与「没配」得到同一个结果。"""
+        from kbapp.library.network import ensure_research_metadata
+
+        external = {'id': 'oa:W1', 'kind': 'external', 'openalex_id': 'W1', 'title': 'Paper'}
+        self.write_settings({'openalex_key': BLOB})
+        result = ensure_research_metadata(self.store, dict(external))
+        # 与「没配」必须可分辨：多一个 scope/reason，且带着可执行的动作。
+        self.assertEqual(result['abstract_scope'], 'key_unreadable')
+        self.assertIn('重新填写', result['abstract_scope_reason'])
+        # 状态里留了一条，供状态页/设置页引导。
+        notice = self.store.state('openalex_key_unusable')
+        self.assertEqual(notice['reason'], 'unreadable')
+        self.assertIn('重新填写', notice['message'])
+
+    def test_ensure_research_metadata_without_a_key_stays_quietly_degraded(self):
+        """没配 key 与读不出必须给不同结果，否则这条修复就成了「处处报警」。"""
+        from kbapp.library.network import ensure_research_metadata
+
+        external = {'id': 'oa:W1', 'kind': 'external', 'openalex_id': 'W1', 'title': 'Paper'}
+        self.write_settings({'openalex_key': ''})
+        result = ensure_research_metadata(self.store, dict(external))
+        self.assertEqual(result['abstract_scope'], 'unavailable')
+        self.assertNotIn('abstract_scope_reason', result)
+        self.assertIsNone(self.store.state('openalex_key_unusable'))
+
+
 class NormalPath(CiphertextCase):
     """密文可解时，读写语义与 #81 之前完全一致。"""
 
