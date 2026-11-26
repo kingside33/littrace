@@ -1,4 +1,5 @@
 """题名方向归类规则：三态配置、双语义（卡片第一条命中/谱系汇总）、人工保护与缓存自动失效。"""
+import json
 import os
 import sqlite3
 import tempfile
@@ -8,6 +9,11 @@ from kbapp.library import cards
 from kbapp.library.sources import sync_library
 from kbapp.research import graph, method_taxonomy as taxonomy
 from kbapp.storage.store import Store
+
+
+def _jsonl_first(path):
+    with open(path, encoding='utf-8') as fh:
+        return json.loads(fh.readline())
 
 
 def _zotero_fixture(zdir):
@@ -86,11 +92,12 @@ class TitleRuleValidation(unittest.TestCase):
         # 生效规则为空：卡片不再走题名推断，落到磁盘规则或兜底 '90'
         self.assertEqual(cards.directions_from_keywords('RRT path planning'), [])
         self.assertEqual(cards.pick_directions({'title': 'RRT path planning', 'collections': []}, ''), ['90'])
-        # 谱系：无方向的文献保持无方向、不置 direction_basis
+        # 谱系：无方向的文献保持无方向；来源记为 fallback(落 90),以便规则变化后能重算
         papers = {'blank': {'title': 'RRT path planning'}}
         taxonomy.annotate(papers, [])
         self.assertEqual(papers['blank']['directions'], [])
-        self.assertNotIn('direction_basis', papers['blank'])
+        self.assertEqual(papers['blank']['primary_direction'], '90')
+        self.assertEqual(papers['blank']['direction_basis'], 'fallback')
 
     def test_invalid_regex_error_names_the_rule(self):
         with self.assertRaises(ValueError) as ctx:
@@ -122,40 +129,34 @@ class TitleRuleValidation(unittest.TestCase):
         self.assertIn('"02"', message)
         self.assertIn('不在方向表', message)
 
-    def test_builtin_vocabulary_check_deferred_to_title_inference_use_points(self):
-        # PR #106 评审:内置词表是默认值而非用户配置。方向表改掉内置编号且未设置
-        # KB_TITLE_RULES 时,导入只验结构与正则,编号不配套在真正使用题名推断的地方
-        # 才报出来——不涉及题名推断的入口不能因为这条默认值整体起不来。
+    def test_builtin_vocabulary_converges_to_effective_direction_table(self):
+        # PR #106 复核 P1:内置词表是默认值而非用户配置。方向表换成别的领域后,
+        # 未设置 KB_TITLE_RULES 的库必须保持原有行为(能对上的编号照常推断,
+        # 对不上的条目只是不参与),而不是 update / 图谱渲染整体不可用。
         saved = cards.DIR_ORDER
         cards.DIR_ORDER = ['A1', 'A2', '90']
         self.addCleanup(setattr, cards, 'DIR_ORDER', saved)
-        for raw in (None, '[]'):
-            if raw is None:
-                os.environ.pop('KB_TITLE_RULES', None)
-            else:
-                os.environ['KB_TITLE_RULES'] = raw
-            cards.KEYWORD_RULES = cards.load_title_rules()  # 导入路径:不抛错
         os.environ.pop('KB_TITLE_RULES', None)
-        cards.KEYWORD_RULES = cards.load_title_rules()
-        # 题名推断使用点:报错指明默认值身份、具体规则与两条出路
-        with self.assertRaises(ValueError) as ctx:
-            cards.directions_from_keywords('覆盖与巡检')
-        message = str(ctx.exception)
-        self.assertIn('内置题名词表', message)
-        self.assertIn('未设置 KB_TITLE_RULES 时的默认值', message)
-        self.assertIn('("覆盖|coverage|CPP|inspection|巡检|检测", ["04"])', message)
-        self.assertIn('"04"', message)
-        self.assertIn('不在方向表', message)
-        self.assertIn('设置 KB_TITLE_RULES', message)
-        self.assertIn('KB_DIRECTIONS', message)
-        # 用户显式配了表外编号:报错同样指名该条规则,并给出关闭题名推断的出路
+        rules = cards.load_title_rules()
+        self.assertEqual(rules, [], '内置词表没有任何编号落在自定义方向表内')
+        self.assertEqual(len(cards.dropped_title_rules()), len(cards._DEFAULT_TITLE_RULES))
+        cards.KEYWORD_RULES = rules
+        self.assertEqual(cards.directions_from_keywords('覆盖与巡检'), [])
+        self.assertEqual(cards.pick_directions({'title': '覆盖与巡检', 'collections': []}, ''), ['90'])
+        # 用户显式配置的表外编号仍属配置错误,报错指名该条规则(不是静默剔除)
         os.environ['KB_TITLE_RULES'] = '[["冷原子", ["04"]]]'
-        cards.KEYWORD_RULES = cards.load_title_rules()
         with self.assertRaises(ValueError) as ctx:
-            cards.directions_from_keywords('冷原子干涉仪')
+            cards.load_title_rules()
         message = str(ctx.exception)
+        self.assertIn('第 1 条', message)
         self.assertIn('("冷原子", ["04"])', message)
-        self.assertIn('KB_TITLE_RULES=[]', message)
+        self.assertIn('不在方向表', message)
+        os.environ.pop('KB_TITLE_RULES', None)
+        # 方向表保留部分内置编号时,对得上的条目照常生效
+        cards.DIR_ORDER = ['04', 'A1', '90']
+        cards.KEYWORD_RULES = cards.load_title_rules()
+        self.assertEqual(cards.directions_from_keywords('覆盖与巡检'), ['04'])
+        self.assertEqual(cards.directions_from_keywords('冷原子量子'), [])
 
     def test_structure_error_names_the_rule(self):
         # issue #100 要求 2「错误信息指出具体是哪条规则(序号与内容)」:结构错误
@@ -229,19 +230,21 @@ class RuleChangeCacheInvalidation(unittest.TestCase):
         self.assertEqual(graph.graph_papers(restart)['cold']['directions'], ['01'])
 
     def test_rule_change_to_non_matching_rule_clears_inferred_directions(self):
-        # 旧规则曾由题名推断出方向；换成不命中该题名的新规则后，推断结果必须清空，
-        # 且不再有 direction_basis（issue #100：相同论文按新规则重新得到展示结果）。
+        # 旧规则曾由题名推断出方向；换成不命中该题名的新规则后，推断结果必须清空
+        # (issue #100：相同论文按新规则重新得到展示结果)。来源改记 fallback，
+        # 这样之后再加回命中规则时还能重算，而不是永久停在空方向。
         cards.KEYWORD_RULES = [('冷原子', ['01'])]
         self.assertEqual(graph.graph_papers(self.store)['cold']['directions'], ['01'])
         self.assertEqual(graph.graph_papers(self.store)['cold']['direction_basis'], 'title_keywords')
         path = self.store.paths.cache / 'graph-taxonomy.json'
         self.assertTrue(path.exists())
 
-        # 内存路径：同一 Store 换成不命中的规则 → directions 清空、无 direction_basis
+        # 内存路径：同一 Store 换成不命中的规则 → directions 清空、来源降为 fallback
         cards.KEYWORD_RULES = [('湍流', ['09'])]
         paper = graph.graph_papers(self.store)['cold']
         self.assertEqual(paper['directions'], [])
-        self.assertNotIn('direction_basis', paper)
+        self.assertEqual(paper['primary_direction'], '90')
+        self.assertEqual(paper['direction_basis'], 'fallback')
 
         # 磁盘路径：重启复用（第二个 Store 从磁盘 records 恢复）同样不命中旧结果
         prior = read_json(path, {})
@@ -249,7 +252,7 @@ class RuleChangeCacheInvalidation(unittest.TestCase):
         restart = Store(self.temp.name)
         paper = graph.graph_papers(restart)['cold']
         self.assertEqual(paper['directions'], [])
-        self.assertNotIn('direction_basis', paper)
+        self.assertEqual(paper['direction_basis'], 'fallback')
 
     def test_lineage_direction_basis_refreshed_after_rule_change(self):
         cards.KEYWORD_RULES = [('冷原子', ['01'])]
@@ -317,6 +320,62 @@ class RuleChangeCacheInvalidation(unittest.TestCase):
         again, _, _ = sync_library(store, os.path.join(base, '_index'))
         self.assertEqual(again[0]['directions'], ['01'])
         self.assertEqual(again[0]['primary_direction'], '01')
+
+    def test_sync_library_records_fallback_then_recomputes_after_rule_change(self):
+        # PR #106 复核 P1:落 90 兜底的入库文献在规则变化后必须重算——这正是
+        # 「非机器人领域先按默认配置跑过、再设 KB_TITLE_RULES」的主路径。
+        store = Store(self.temp.name)
+        zdir = os.path.join(self.temp.name, 'zotero')
+        os.makedirs(zdir)
+        _zotero_fixture(zdir)
+        base = os.path.join(self.temp.name, 'base')
+        os.makedirs(base)
+        atomic(store.paths.state / 'settings.json', {'zotero_dir': zdir})
+        cards.KEYWORD_RULES = [('湍流', ['09'])]  # 不命中
+        papers, _, _ = sync_library(store, os.path.join(base, '_index'))
+        pid = papers[0]['id']
+        self.assertEqual((papers[0]['directions'], papers[0]['direction_basis']), (['90'], 'fallback'))
+        self.assertTrue(papers[0].get('direction_rules_digest'), '兜底也要写摘要,否则永不重算')
+        store.put_papers(papers)
+        cards.KEYWORD_RULES = [('冷原子', ['06'])]  # 换成命中
+        paper = graph.graph_papers(store)[pid]
+        self.assertEqual(paper['directions'], ['06'])
+        self.assertEqual(paper['direction_basis'], 'title_keywords')
+        restart = Store(self.temp.name)
+        self.assertEqual(graph.graph_papers(restart)[pid]['directions'], ['06'], '磁盘复用同样重算')
+
+    def test_recompute_syncs_fields_derived_from_directions(self):
+        # PR #106 复核 P2:展示与筛选读 primary_direction(图谱配色、--direction 过滤),
+        # 重算 directions 时必须一并刷新它和 project/project_stages,否则同一条文献自相矛盾。
+        self.store.put_papers([{'id': 'p', 'kind': 'library', 'title': '冷原子干涉仪',
+                                 'directions': ['06'], 'primary_direction': '06',
+                                 'direction_basis': 'title_keywords', 'direction_rules_digest': 'old'}])
+        cards.KEYWORD_RULES = [('冷原子', ['04'])]  # 04 在默认 STAGES 里
+        paper = graph.graph_papers(self.store)['p']
+        self.assertEqual(paper['directions'], ['04'])
+        self.assertEqual(paper['primary_direction'], '04', '图谱配色 / --direction 过滤读它')
+        self.assertEqual(paper['project_stages'], ['阶段四'])
+        self.assertNotEqual(paper['project'], '', '落到课题阶段时必须同时置 project')
+        # 反向:换回不属于课题阶段的方向时,派生字段必须一起清空
+        cards.KEYWORD_RULES = [('冷原子', ['06'])]
+        paper = graph.graph_papers(self.store)['p']
+        self.assertEqual(paper['primary_direction'], '06')
+        self.assertEqual(paper['project_stages'], [])
+        self.assertEqual(paper['project'], '')
+
+    def test_write_papers_all_keeps_direction_source(self):
+        # PR #106 复核 P2:build_cards 计算的 direction_basis 不能在落盘时丢掉,
+        # 否则 annotate 的 stale 判据对卡片重建产出的文献永远为 False。
+        with tempfile.TemporaryDirectory() as out:
+            cards.write_papers_all([{'citekey': 'K', 'zotero_key': None, 'title': 'T', 'authors': [],
+                                     'year': 2020, 'venue': '', 'doi': '', 'abstract': '', 'tldr': '',
+                                     'directions': ['06'], 'primary_direction': '06',
+                                     'direction_basis': 'title_keywords', 'direction_rules_digest': 'abc',
+                                     'tagfields': {}, 'other_tags': [], 'metadata_source': 'filename',
+                                     'pdf': None, 'pdf_exists': False, 'collections': []}], out)
+            row = _jsonl_first(os.path.join(out, 'papers_all.jsonl'))
+        self.assertEqual(row['direction_basis'], 'title_keywords')
+        self.assertEqual(row['direction_rules_digest'], 'abc')
 
     def test_sync_library_keeps_manual_direction_assignment(self):
         # 人工指定的方向不被入库覆盖;即使没有 directions 键也不能在 primary_direction 上抛错。

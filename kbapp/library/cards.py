@@ -31,8 +31,8 @@ _DEFAULT_TITLE_RULES = [('覆盖|coverage|CPP|inspection|巡检|检测', ['04'])
 def validate_title_rules(value, name='KB_TITLE_RULES', check_dirs=True):
     """校验 [[正则, [方向编号]], ...] 并归一化；显式空列表合法（关闭题名推断）。
 
-    check_dirs=False 只验结构、形状与正则：导入阶段先用它加载内置词表，编号对生效
-    方向表的检查交给 ensure_title_rules() 在题名推断使用点补上。
+    check_dirs=False 只验结构、形状与正则：导入阶段先用它加载内置词表，编号由
+    apply_title_rules_dirs() 按生效方向表收敛（而不是让默认值挡住整个库）。
     """
     if not isinstance(value, list):
         raise ValueError(f'{name} 必须是 [[正则, [方向编号]], ...] 形式的 JSON 数组')
@@ -58,39 +58,42 @@ def validate_title_rules(value, name='KB_TITLE_RULES', check_dirs=True):
     return rules
 
 
-def _unknown_direction_error(rules, name='KB_TITLE_RULES'):
-    """第一条与生效方向表不符的规则的报错文本；全部合法返回空串。"""
+def apply_title_rules_dirs(rules, name='KB_TITLE_RULES'):
+    """把规则的目标编号收敛到生效方向表，并报告被丢弃的条目。
+
+    内置词表是机器人/路径规划领域的默认值，方向表换成别的领域后它引用的编号
+    必然不在表内。此时保留原有行为：该条不参与题名推断（等于未设置），
+    而不是让整个库不可用（issue #100 要求 1）。用户显式配置的规则不做收敛，
+    配了表外编号属于配置错误，由 validate_title_rules 报出。
+    """
+    kept, dropped = [], []
     for index, (pattern, dirs) in enumerate(rules, 1):
-        for d in dirs:
-            if d not in DIR_ORDER:
-                return f'{name} 第 {index} 条 ({json.dumps(pattern, ensure_ascii=False)}, {json.dumps(list(dirs), ensure_ascii=False)}) 的方向编号 {json.dumps(d, ensure_ascii=False)} 不在方向表中'
-    return ''
+        ids = [d for d in dirs if d in DIR_ORDER]
+        if ids:
+            kept.append((pattern, ids))
+        else:
+            dropped.append(f'第 {index} 条 ({json.dumps(pattern, ensure_ascii=False)}, {json.dumps(list(dirs), ensure_ascii=False)})')
+    return kept, dropped
 
 
 def load_title_rules():
     """题名→方向规则三态：未设置 KB_TITLE_RULES 用内置词表，显式 [] 关闭题名推断，其余校验后生效。
 
-    导入阶段只验结构、形状与正则：编号对生效方向表的检查推迟到 ensure_title_rules()，
-    这样方向表已改、题名规则未配（或配了表外编号）的库仍能用不涉及题名推断的入口
-    （issue #100 / PR #106 评审）。
+    未设置时内置词表按生效方向表收敛：方向表换了领域后，内置词表里对不上表外
+    编号的条目被剔除（保留原有「未设置 = 只有能对上的编号才推断」的行为），
+    不会因为这条默认值让整个库不可用（issue #100 要求 1，PR #106 复核）。
     """
     value = env_json('KB_TITLE_RULES', None)
     if value is None:
-        return validate_title_rules(_DEFAULT_TITLE_RULES, check_dirs=False)
-    return validate_title_rules(value, check_dirs=False)
+        return apply_title_rules_dirs(validate_title_rules(_DEFAULT_TITLE_RULES, check_dirs=False))[0]
+    return validate_title_rules(value)
 
 
-def ensure_title_rules():
-    """题名推断使用点确认规则与生效方向表配套；不配套时报可操作错误。"""
-    error = _unknown_direction_error(KEYWORD_RULES)
-    if not error:
-        return
-    if os.environ.get('KB_TITLE_RULES') is None:
-        raise ValueError(
-            f'内置题名词表(未设置 KB_TITLE_RULES 时的默认值)不在生效方向表内: {error}; '
-            '处理方式: 设置 KB_TITLE_RULES 显式给出题名规则, 或让 KB_DIRECTIONS 保留内置词表引用的方向编号'
-        )
-    raise ValueError(f'{error}; 处理方式: 显式设置 KB_TITLE_RULES=[] 关闭题名推断, 或把该条规则改用生效方向表里的编号')
+def dropped_title_rules():
+    """未设置 KB_TITLE_RULES 时被生效方向表剔除的内置条目；显式配置时恒为空。"""
+    if env_json('KB_TITLE_RULES', None) is not None:
+        return []
+    return apply_title_rules_dirs(validate_title_rules(_DEFAULT_TITLE_RULES, check_dirs=False))[1]
 
 
 KEYWORD_RULES = load_title_rules()
@@ -173,9 +176,6 @@ def directions_from_disk(rel):
     return []
 
 def directions_from_keywords(text):
-    if not KEYWORD_RULES:
-        return []
-    ensure_title_rules()
     for pat, ds in KEYWORD_RULES:
         if re.search(pat, text, re.IGNORECASE):
             return list(ds)
@@ -539,7 +539,7 @@ def card_rel_path(rec):
 def write_papers_all(records, index_dir):
     rows = []
     for r in records:
-        rows.append({'citekey': r['citekey'], 'zotero_key': r['zotero_key'], 'title': r['title'], 'authors': r['authors'], 'year': r['year'], 'venue': r['venue'], 'doi': r['doi'], 'abstract': r['abstract'], 'tldr': r['tldr'], 'directions': r['directions'], 'primary_direction': r['primary_direction'], 'tags': sorted([f'{k}:{v}' for k, vs in r['tagfields'].items() for v in vs] + r['other_tags']), 'metadata_source': r['metadata_source'], 'pdf': r['pdf'], 'pdf_exists': r['pdf_exists'], 'collections': r['collections'], 'tagfields': {k: sorted(set(v)) for k, v in r['tagfields'].items()}, 'card': card_rel_path(r)})
+        rows.append({'citekey': r['citekey'], 'zotero_key': r['zotero_key'], 'title': r['title'], 'authors': r['authors'], 'year': r['year'], 'venue': r['venue'], 'doi': r['doi'], 'abstract': r['abstract'], 'tldr': r['tldr'], 'directions': r['directions'], 'primary_direction': r['primary_direction'], 'direction_basis': r.get('direction_basis'), 'direction_rules_digest': r.get('direction_rules_digest'), 'tags': sorted([f'{k}:{v}' for k, vs in r['tagfields'].items() for v in vs] + r['other_tags']), 'metadata_source': r['metadata_source'], 'pdf': r['pdf'], 'pdf_exists': r['pdf_exists'], 'collections': r['collections'], 'tagfields': {k: sorted(set(v)) for k, v in r['tagfields'].items()}, 'card': card_rel_path(r)})
     with open(os.path.join(index_dir, 'papers_all.jsonl'), 'w', encoding='utf-8', newline='\n') as fh:
         for row in rows:
             fh.write(json.dumps(row, ensure_ascii=False) + '\n')
