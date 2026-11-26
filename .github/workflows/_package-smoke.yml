@@ -1,0 +1,70 @@
+name: Reusable package smoke
+
+# Called by the nightly workflow and by the CI heavy lane. The distribution
+# checks live here so the daily and pre-merge runs cannot drift.
+
+"on":
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  package-smoke:
+    name: package-smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      # `python -m build` needs packaging metadata. Fail with an explicit
+      # message rather than skipping the job, so a missing distribution is
+      # visible instead of looking green.
+      - name: Require packaging metadata
+        run: |
+          set -euo pipefail
+          if [ ! -f pyproject.toml ]; then
+            echo "::error::pyproject.toml is missing; the sdist/wheel cannot be built. Add packaging metadata before relying on package-smoke."
+            exit 1
+          fi
+
+      - name: Build sdist and wheel, then check metadata
+        env:
+          PIP_DEFAULT_TIMEOUT: "30"
+          PIP_RETRIES: "5"
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip build twine
+          python -m build
+          python -m twine check --strict dist/*
+
+      - name: Install the wheel into a clean venv and import it
+        env:
+          PIP_DEFAULT_TIMEOUT: "30"
+          PIP_RETRIES: "5"
+        run: |
+          set -euo pipefail
+          python -m venv /tmp/littrace-smoke
+          /tmp/littrace-smoke/bin/pip install --quiet dist/*.whl
+          # Run outside the checkout: littrace uses a flat layout, so the repo
+          # root on sys.path would shadow the installed package and hide
+          # missing files in the wheel.
+          cd /tmp
+          /tmp/littrace-smoke/bin/python - <<'PY'
+          import importlib.metadata
+          import pathlib
+
+          import kbapp
+          from kbapp.web.service import create_app
+
+          root = pathlib.Path(kbapp.__file__).parent
+          assert (root / "web" / "assets" / "app.css").is_file(), (
+              "web assets are missing from the wheel"
+          )
+          assert callable(create_app)
+          assert importlib.metadata.version("littrace")
+          print("ok", kbapp.__file__, importlib.metadata.version("littrace"))
+          PY

@@ -207,6 +207,40 @@ CI is the record, not this document. A green local run means the commands you
 ran passed. Do not write "all green" in a pull request unless you actually ran
 the commands, and say which platform and data shape you did not exercise.
 
+### CI lanes
+
+CI has two lanes. The **fast lane** runs on every push and pull request: Ruff,
+actionlint, DCO, pytest on Ubuntu with Python 3.13, the frontend tests on both
+Ubuntu and Windows, and the plugin build on both. The **heavy lane** adds the
+remaining pytest platforms (Ubuntu with Python 3.10 and Windows with 3.13) and
+the package smoke (build the sdist/wheel, check the metadata, install the wheel
+in a clean venv). It runs only on `merge_group` or on a pull request carrying
+the `full-ci` label.
+
+Add the `full-ci` label when a change touches cross-platform behaviour,
+packaging, the Python version floor, or a Windows-specific path. Any label
+change re-runs the fast lane because GitHub cannot filter `pull_request` events
+by label name; the heavy jobs still run only when `full-ci` is present.
+
+`CI gate` is the single stable status context. On an ordinary pull request the
+heavy jobs are skipped and the gate reports `deferred`, which is a success
+conclusion. On a `full-ci` pull request and on every merge-queue entry the gate
+requires the heavy lane; a skipped heavy job is a failure. Removing `full-ci`
+after a heavy failure does not turn the gate green: the `unlabeled` event still
+requires the heavy lane, so push again or add the label back.
+
+The gate script is read from the default branch, so a pull request cannot
+supply the rule that judges it. The only exception is the pull request that
+introduces the script (the bootstrap window). The gate is not a required check
+until it has produced a `success` on the default branch; see the bootstrapping
+note in the DCO section.
+
+The merge queue itself is not enabled yet: the repository is owned by a
+personal account, and GitHub only offers merge queues to organizations. The
+`merge_group` trigger and the gate's queue semantics are already wired so the
+queue can be enabled after the repository moves to an organization; that step
+is tracked in a separate issue.
+
 ### Tests and fixtures
 
 - Put temporary state under pytest's `tmp_path`, or run the command with
@@ -467,14 +501,13 @@ The check is `scripts/ci/check_dco.py`, run by one `dco` job in
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml). It uses no third-party
 DCO action.
 
-- It runs on `pull_request` only. The workflow is triggered by `push` to
-  `main` and `pull_request`, and the `dco` job has
-  `if: github.event_name == 'pull_request'`.
-- `scripts/ci/check_dco.py` also implements a `merge_group` branch that reports
-  `not_applicable` and exits `0`, but this repository has no merge queue and the
-  workflow does not trigger on `merge_group`, so that branch is currently
-  unused. Do not enable a merge queue expecting this check to run until the
-  trigger and the job condition are changed together.
+- It runs on `pull_request` and on `merge_group`. The workflow is triggered by
+  `push` to `main`, `pull_request` and `merge_group`; the `dco` job has
+  `if: github.event_name == 'pull_request' || github.event_name == 'merge_group'`.
+- On `merge_group` the script reports `not_applicable` and exits `0`: the
+  grouped commits already passed the pull-request check. The merge queue is not
+  enabled yet because the repository is owned by a personal account; the branch
+  is ready for the day it is.
 - It has `contents: read` and `pull-requests: read`; it does not need write
   access.
 - It does not check out the pull request. The script, `DCO` and
@@ -505,6 +538,8 @@ do not add a second, DCO-specific required status.
 Bootstrapping: the script, `DCO` and this file must be on the default branch
 before the check is made required. A pull request cannot add the rule that
 judges itself, so land the tooling first and enable branch protection after it.
+The same rule applies to `CI gate`: it must first produce a `success` on the
+default branch, and only then can it be registered as a required context.
 
 ## Licence and contribution terms
 

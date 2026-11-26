@@ -5,27 +5,27 @@ name: CodeQL
 # code. Today there is no custom CodeQL config file; add one only when a
 # concrete, documented false positive cannot be fixed in the source.
 #
-# Private-repository caveat: code scanning with CodeQL requires GitHub Code
-# Security for private repositories. Until this repository is public or the
-# licence is in place, this workflow may not be able to upload results; do not
-# make it a required check yet. Turning it on after the repository becomes
-# public is a ruleset change, not a workflow change.
+# The repository is public, so the earlier private-repository caveat no longer
+# applies. Whether `CodeQL gate` becomes a required check is a ruleset change,
+# tracked separately from this workflow.
 "on":
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  merge_group:
+    types: [checks_requested]
   schedule:
     # Weekly, matching the cadence the queries themselves change at.
     - cron: "23 4 * * 1"
   workflow_dispatch:
 
-# Same grouping rule as CI: a new pull request push replaces the previous scan,
-# while main and scheduled scans are never cancelled. There is no merge queue,
-# so no merge-queue event and no aggregate gate: the matrix is the result.
+# Same grouping rule as CI: grouped by head SHA and never cancelled, because a
+# cancelled gate cannot turn green afterwards. The `CodeQL gate` job below is
+# the stable context; the matrix itself is not a contract.
 concurrency:
-  group: codeql-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: codeql-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -64,3 +64,50 @@ jobs:
           # Keep the category stable so the alert ledger survives workflow
           # changes instead of treating every edit as a new analysis.
           category: "/language:${{ matrix.language }}"
+          # A merge-queue entry is a temporary combination of main and the
+          # queued pull requests; uploading its SARIF would duplicate alerts
+          # against a ref that disappears. The queue only needs the analysis
+          # conclusion, so do not upload there.
+          upload: ${{ github.event_name == 'merge_group' && 'never' || 'always' }}
+
+  # The stable required context for CodeQL. The matrix above expands to two
+  # check names; this job is the one name a ruleset can require. It is skipped
+  # on schedule so a weekly query failure does not turn the main head red.
+  codeql-gate:
+    name: CodeQL gate
+    if: ${{ always() && github.event_name != 'schedule' }}
+    needs: [analyze]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Choose the judge
+        id: judge
+        run: |
+          set -euo pipefail
+          if [ -s trusted/scripts/ci/aggregate_gate.py ]; then
+            echo "path=trusted/scripts/ci/aggregate_gate.py" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=scripts/ci/aggregate_gate.py" >> "$GITHUB_OUTPUT"
+            echo "::notice::default branch does not have aggregate_gate.py yet (bootstrap); using this revision's copy"
+          fi
+      - name: Aggregate the gate
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python -I "${{ steps.judge.outputs.path }}" \
+            --gate codeql \
+            --event "${{ github.event_name }}" \
+            --needs-json "$NEEDS_JSON"
