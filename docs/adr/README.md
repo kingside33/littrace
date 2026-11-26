@@ -1,6 +1,12 @@
 # 架构决策记录(ADR)
 
-本目录记录 littrace 的重要架构决策:机制选型、契约、流程与验收方法。
+本目录记录 littrace 的架构决策:机制选型、契约、流程与验收方法。
+
+## 触发条件
+
+新功能,或对既有功能的任何修改,一律撰写或修订 ADR:对应实现 PR 必须携带
+DecisionRecord,不按「决策是否重要」裁量。修订既有决策时,遵守下方
+「定稿不改写」条款。
 
 ## 编号纪律
 
@@ -51,3 +57,10 @@
 | [0034](0034-u3-gap-hint-by-cause.md) | [U3] 缺口卡片按成因给提示 | warning 与截断不是「无证据」,共用文案会否定上方的证据 |
 | [0035](0035-u5-client-origin-pure-verdict.md) | [U5] 端口变更以纯函数判定是否重建客户端 | 任何 origin 差异即重建,令牌随旧客户端丢弃 |
 | [0036](0036-u5-last-sync-by-state-not-timestamp.md) | [U5] 上次同步按 export_sync 状态判定 | 三次写入都刷新 updated,只看时间戳会把失败读成成功 |
+| [0041](0041-p2-cloud-config-via-service-not-prefs.md) | [P2] 云端配置走服务侧 settings.json,密钥不落 Zotero pref | prefs 是明文且只回布尔,密钥由服务 DPAPI 保存,清除是独立载荷 |
+| [0042](0042-p1-server-settings-table-separate-from-prefs.md) | [P1] 服务侧字段表与 Zotero pref 表分离,键名跨语言锚定 | 塞进 PREF_ENTRIES 会毁掉「每行都有 preference= 绑定」的契约 |
+| [0043](0043-s7-probe-endpoint-contract.md) | [S7] 探测端点复用 open_cloud、三态 verdict、预算小于客户端超时 | 两个 10s 相等会让用户永远看不到探测结论;布尔 ok 必然说谎 |
+| [0044](0044-s7-no-cross-origin-redirect-for-bearer.md) | [S7] Authorization 不随跨 origin 跳转转发 | urllib 重定向保留请求头,守卫只装探测路径,complete() 另立 #80 |
+| [0045](0045-p3-single-snapshot-read-and-section-scoped-writes.md) | [P3] 设置页单次快照读取,每组只写自己的 section | 各组自读发 6 个请求且显示不同时刻;整表保存会清掉对方的字段 |
+| [0046](0046-lessons-book-weekly-review.md) | [流程] 错题本单文件 + Seen 阈值升级,由每周周报 issue 驱动 | 格式门禁之外补 `--report` 与定时 issue,升级/删除才真正执行;不阻塞 PR |
+| [0047](0047-review-lock-transient-permissionerror-retry.md) | Windows 共享锁文件上的瞬时 PermissionError 按竞争重试,不作为错误上抛 | 瞬时共享冲突按竞争重试被吸收,真权限问题仍显式浮出(#97) |

@@ -1,0 +1,82 @@
+name: Lessons review
+
+# 错题本的价值在升级与删除两个出口:同一条目在 3 个不同日期出现后要升级成
+# 硬规则,60 天不复发要删除。这两条规则此前没有任何调用方——`--due` 只存在
+# 于命令行,看板上唯一相关的运行是 CI 里的一次格式校验。本工作流每周把到期
+# 条目汇总成一个 issue,让规则真正被执行。
+#
+# 它不阻塞 PR。让一条教训到期把无关改动变红,只会教人绕过门禁;到期条目挂
+# 在 issue 上,由维护者在独立的 `docs(lessons)` PR 里处理。
+"on":
+  schedule:
+    # UTC 周日 17:00 = 北京周一 01:00。
+    - cron: "0 17 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+# 一周一次,串行即可;中断会让当周结论缺失,所以不取消正在跑的那次。
+concurrency:
+  group: lessons-review
+  cancel-in-progress: false
+
+jobs:
+  report:
+    name: lessons-report
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      # 周报是纯函数输出:日期、体积、到期条目都来自 docs/lessons.md 与当天。
+      # 生成失败说明文件本身坏了,让 job 红,不要开一个空 issue。
+      - name: Build the report
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/check_lessons.py --report > "$RUNNER_TEMP/lessons-report.md"
+          test -s "$RUNNER_TEMP/lessons-report.md"
+
+      # 标签是 issue 的去重键,所以先确保它存在;--force 让重复运行幂等。
+      - name: Ensure the label exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh label create lessons-review --color fbca04 --description "错题本到期条目周报" --force
+
+      # 有到期条目就开或更新最早的一个 issue,多余的关掉;没有就全部关闭。
+      # 去重靠标签而不是标题搜索:标题可以被改,标签不会。遍历所有带标签的
+      # open issue 而不是只取最新一个,人工误建的带标签 issue 不会永久滞留。
+      - name: Open, update, or close the review issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          BODY="$RUNNER_TEMP/lessons-report.md"
+          OPEN=$(gh issue list --label lessons-review --state open --json number --jq 'map(.number) | sort | .[]')
+          if grep -q 'no-lessons-due' "$BODY"; then
+            if [ -z "$OPEN" ]; then
+              echo "No lessons are due."
+            else
+              for n in $OPEN; do
+                gh issue close "$n" --comment "本轮没有到期条目,自动关闭。"
+              done
+            fi
+            exit 0
+          fi
+          FIRST=$(printf '%s\n' "$OPEN" | head -n 1)
+          for n in $OPEN; do
+            if [ "$n" = "$FIRST" ]; then
+              gh issue edit "$n" --body-file "$BODY"
+              echo "Updated issue #$n."
+            else
+              gh issue close "$n" --comment "与 #$FIRST 重复,保留最早的一个。"
+            fi
+          done
+          if [ -z "$OPEN" ]; then
+            gh issue create --title "错题本:有到期条目待升级或删除" --body-file "$BODY" --label lessons-review
+          fi

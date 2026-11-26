@@ -60,3 +60,23 @@
 - 为什么: 裸 `node --test` 的目录 glob 会把「已跟踪但未登记」的文件掩盖掉。两处
   显式清单加守卫步骤,能在本地与 CI 同时暴露漏登记。
 - 证据: #13
+
+### L-006 PR 正文承诺的后续动作要当场开 issue 跟踪
+- 类: 别这样
+- Seen: 2026-11-19, 2026-11-20
+- 为什么: #83 的 DecisionRecord 写「后续批次按仓库纪律补 ADR」,承诺没有登记成
+  issue,此后多个 PR 合并都无人跟进,错题本的决策记录缺席到 #96 才落盘。对照面:
+  「合并后手动 dispatch 验证」登记进 issue #95 的验收清单,才被真正执行。承诺要
+  落 issue,不要落在 PR 正文或会话记录的一句话里。
+- 证据: #83, #95, #96
+
+### L-007 mergeable=MERGEABLE 只看冲突,追平策略要用实际报错验证
+- 类: 别这样
+- Seen: 2026-11-21
+- 为什么: 集成复核 PR #96 时,以 `gh api repos/…/rulesets` 的空结果断言「无
+  ruleset」,但 main 的 ruleset 带 `strict_required_status_checks_policy: true`,
+  BEHIND 被 GitHub 两次拒绝("head branch is not up to date")。mergeable 只反映
+  冲突,不反映追平要求;ruleset 空结果与「能合并」都不能当结论,以合并请求的
+  实际报错为准。追平路径:worktree 合入 origin/main,重跑全部门禁,push 后等
+  `mergeStateStatus: CLEAN` 再合并。
+- 证据: #96
