@@ -247,6 +247,41 @@ class DoctorAttachments(unittest.TestCase):
         with mock.patch('builtins.open', side_effect=OSError('模拟打开失败')):
             self.assertEqual(doctor_attachments.probe_file(str(existing)), 'unreadable')
 
+    # 场景 8：--problems 输出锚定（issue #98 需求 3）：逐行形如「库/文献/附件：状态词」，
+    # 无问题项时输出「（无）」，not_file 不进入问题项，且不输出摘要行。
+    def test_problems_output_lists_each_problem_and_none_placeholder(self):
+        build_zotero_db(str(self.zdir),
+                        [(1, 'PAPERH01', PAPER, 1), (2, 'ATTHH001', ATTACHMENT, 1),
+                         (3, 'ATTHH002', ATTACHMENT, 1), (4, 'ATTHH003', ATTACHMENT, 1)],
+                        [(2, 1, 'application/pdf', 'storage:gone.pdf'),
+                         (3, 1, 'application/pdf', storage_file(str(self.zdir), 'ATTHH002', 'ok.pdf')),
+                         (4, 1, 'text/html', None)])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(doctor_attachments.main(['--zotero-dir', str(self.zdir),
+                                                      '--base', str(self.base), '--problems']), 0)
+        text = out.getvalue()
+        self.assertIn('问题项 1 条', text)
+        self.assertIn('库 1 文献 PAPERH01 附件 ATTHH001：路径缺失', text)
+        # not_file（linked_url）不算文件可用性问题，不进问题项；可读附件也不进。
+        self.assertNotIn('ATTHH002', text)
+        self.assertNotIn('ATTHH003', text)
+        self.assertNotIn('非文件链接', text)
+        self.assertNotIn('数据来源', text)
+        self.assertNotIn(str(self.zdir), text)
+        # 无问题项时给出「（无）」，而不是空输出。
+        Path(self.zdir, 'zotero.sqlite').unlink()
+        build_zotero_db(str(self.zdir),
+                        [(1, 'PAPERH02', PAPER, 1), (2, 'ATTHH004', ATTACHMENT, 1)],
+                        [(2, 1, 'application/pdf', storage_file(str(self.zdir), 'ATTHH004', 'ok.pdf'))])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(doctor_attachments.main(['--zotero-dir', str(self.zdir),
+                                                      '--base', str(self.base), '--problems']), 0)
+        text = out.getvalue()
+        self.assertIn('问题项 0 条', text)
+        self.assertIn('（无）', text)
+
     # JSON 输出：可解析、键集合稳定、不含绝对路径与文件名。
     def test_json_shape_is_stable_and_carries_no_paths(self):
         build_zotero_db(str(self.zdir),
@@ -267,8 +302,9 @@ class DoctorAttachments(unittest.TestCase):
         self.assertNotIn(str(self.base), text)
         self.assertNotIn('secret-name', text)
 
-    # zotero_dir 解析顺序：--zotero-dir > KB_ZOTERO_DIR > settings.json；都没有则报错退出 2。
-    def test_zotero_dir_resolution_order_and_missing_guidance(self):
+    # zotero_dir 解析顺序：--zotero-dir > settings.json > KB_ZOTERO_DIR（与 store.settings()
+    # 同口径，settings.json 覆盖 env）；都没有则指引并退出 2。
+    def test_zotero_dir_resolution_matches_update_precedence_and_missing_guidance(self):
         paths = Paths.from_base(str(self.base))
         self.assertEqual(doctor_attachments.resolve_zotero_dir('explicit', paths), 'explicit')
         with mock.patch.dict(os.environ, {'KB_ZOTERO_DIR': 'from-env'}):
@@ -284,10 +320,33 @@ class DoctorAttachments(unittest.TestCase):
         settings.write_text(json.dumps({'zotero_dir': 'from-settings'}), encoding='utf-8')
         with mock.patch.dict(os.environ, {'KB_ZOTERO_DIR': ''}):
             self.assertEqual(doctor_attachments.resolve_zotero_dir(None, paths), 'from-settings')
+        # 两处同时配置时 settings.json 赢（与 kb.py update 体检同一个库）。
+        with mock.patch.dict(os.environ, {'KB_ZOTERO_DIR': 'from-env'}):
+            self.assertEqual(doctor_attachments.resolve_zotero_dir(None, paths), 'from-settings')
         # settings.json 兜底端到端：不加 --zotero-dir 也能跑到库。
         build_zotero_db(str(self.zdir), [], [])
         settings.write_text(json.dumps({'zotero_dir': str(self.zdir)}), encoding='utf-8')
         code, report = self.run_json(['--base', str(self.base), '--json'])
+        self.assertEqual(code, 0)
+        self.assertEqual(report['summary']['items'], 0)
+
+    # settings.json 读不动（注入 read_json 抛 PermissionError）→ 不带 traceback、
+    # 不退回环境变量换成另一个库，按「检查无法执行」契约给指引并退出 2。
+    def test_unreadable_settings_json_exits_2_without_falling_back(self):
+        with mock.patch.dict(os.environ, {'KB_ZOTERO_DIR': str(self.zdir)}):
+            with mock.patch.object(doctor_attachments, 'read_json', side_effect=PermissionError(13, 'denied')):
+                out = io.StringIO()
+                err = io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    code = doctor_attachments.main(['--base', str(self.base), '--json'])
+        self.assertEqual(code, 2)
+        self.assertEqual(out.getvalue(), '')
+        self.assertIn('settings.json', err.getvalue())
+        self.assertIn('--zotero-dir', err.getvalue())
+        # 明确解析：--zotero-dir 时完全不读 settings.json。
+        build_zotero_db(str(self.zdir), [], [])
+        with mock.patch.object(doctor_attachments, 'read_json', side_effect=AssertionError('不应读取 settings.json')):
+            code, report = self.run_json(['--zotero-dir', str(self.zdir), '--base', str(self.base), '--json'])
         self.assertEqual(code, 0)
         self.assertEqual(report['summary']['items'], 0)
 

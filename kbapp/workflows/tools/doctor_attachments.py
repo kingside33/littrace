@@ -86,14 +86,28 @@ def is_pdf_attachment(att):
 
 
 def resolve_zotero_dir(explicit, paths):
-    """解析顺序：--zotero-dir → 环境变量 KB_ZOTERO_DIR → settings.json 的 zotero_dir。"""
+    """解析顺序：--zotero-dir → settings.json 的 zotero_dir → 环境变量 KB_ZOTERO_DIR。
+
+    与 kb.py update 同口径：Store.settings()（kbapp/storage/store.py:146-153）把
+    settings.json 覆盖到 DEFAULTS 之上，而 DEFAULTS['zotero_dir'] 来自
+    KB_ZOTERO_DIR（kbapp/core/config.py:8）——所以 settings.json 赢、环境变量输。
+    doctor 必须体检「最近同步」的那个库（kbapp/library/sources.py:108 走的就是
+    store.settings()），否则用户同时配置两处时会静默给出与同步无关的结论。
+    --zotero-dir 是 doctor 自身的临时覆盖入口，优先级最高。
+
+    这里不构造 Store（那会建库、破坏零写入），只复现同一份合并规则：
+    settings.json 提供了该键就以其为准，否则取 DEFAULTS['zotero_dir'] 的来源
+    环境变量 KB_ZOTERO_DIR（空串视为未设置）。
+    settings.json 读不动时 PermissionError/OSError 原样上抛，由 main 映射为
+    退出码 2——绝不静默退回环境变量换成另一个库。
+    """
     if explicit:
         return explicit
-    env = os.environ.get('KB_ZOTERO_DIR', '')
-    if env:
-        return env
     data = read_json(paths.state / 'settings.json', {}) or {}
-    value = data.get('zotero_dir')
+    if 'zotero_dir' in data:
+        value = data['zotero_dir']
+    else:
+        value = os.environ.get('KB_ZOTERO_DIR', '')
     return value if isinstance(value, str) and value else None
 
 
@@ -187,13 +201,19 @@ def print_problems(report):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description='整库 PDF 可用性检查（只读，零写入）')
-    ap.add_argument('--zotero-dir', help='Zotero 数据目录；默认 KB_ZOTERO_DIR 或 settings.json 的 zotero_dir')
+    ap.add_argument('--zotero-dir', help='Zotero 数据目录；覆盖 settings.json 与 KB_ZOTERO_DIR')
     ap.add_argument('--base', help='文献系统根目录；解析 attachments: 相对路径时使用')
     ap.add_argument('--problems', action='store_true', help='仅列出问题项')
     ap.add_argument('--json', action='store_true', help='输出稳定 JSON（含摘要与问题项）')
     args = ap.parse_args(argv)
     paths = Paths.from_base(args.base)
-    zdir = resolve_zotero_dir(args.zotero_dir, paths)
+    try:
+        zdir = resolve_zotero_dir(args.zotero_dir, paths)
+    except OSError:
+        print('无法读取数据目录 state/settings.json，无法确定 Zotero 数据目录。'
+              '请确认该文件可读（不是同名目录、未被其它进程占用），'
+              '或改用 --zotero-dir / 环境变量 KB_ZOTERO_DIR 指定。', file=sys.stderr)
+        return 2
     if not zdir:
         print('未找到 Zotero 数据目录，无法执行检查。请任选其一：', file=sys.stderr)
         print('  1. 运行时加 --zotero-dir <Zotero 数据目录>', file=sys.stderr)
