@@ -112,6 +112,9 @@ CONTRIBUTING.md 的「Lessons(错题本)」。动手改代码与评审之前,先
   CONTRIBUTING.md 或新 ADR,条目压缩成一行指针。
 - **规则要有证据**:`证据` 只写 issue 或 PR 编号,与本仓库「先提 issue 再提 PR」
   的纪律一致。
+- **每周有周报**:`.github/workflows/lessons-review.yml` 每周一把到期升级与
+  60 天未复发的条目汇总成 `lessons-review` issue;它不阻塞 PR,但到期条目会
+  一直挂在 issue 上,处理仍走独立的 `docs(lessons)` PR。
 
 ## 验证入口(与 ci.yml 一致)
 

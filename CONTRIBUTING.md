@@ -342,8 +342,17 @@ Privacy: this is a public repository. Do not write local paths, library
 content, personal configuration or credentials; evidence stops at issue
 numbers.
 
+Review loop: [`lessons-review.yml`](.github/workflows/lessons-review.yml) runs
+`python scripts/check_lessons.py --report` every Monday at 01:00 Asia/Shanghai
+and on manual dispatch. It opens or updates one issue labelled `lessons-review`
+listing entries whose `Seen` has reached three distinct dates and entries that
+have not recurred for 60 days; when neither list has an entry, it closes that
+issue. The workflow never blocks a pull request: a due lesson must not turn an
+unrelated change red. Promotion and deletion still happen in a `docs(lessons)`
+pull request, so the issue is a reminder, not the change itself.
+
 `python scripts/check_lessons.py` enforces the format, numbering, the 16 KiB
-cap and the privacy patterns. CI runs it.
+cap and the privacy patterns. CI runs it; `--report` feeds the weekly issue.
 
 ## Pull requests
 

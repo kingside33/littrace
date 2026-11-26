@@ -165,7 +165,25 @@ class Store:
                 raise ValueError(f'未知配置：{key}')
             if key in {'api_key', 'openalex_key'} and value is None:
                 continue
-            if isinstance(DEFAULTS[key], bool):
+            if key == 'network_depth':
+                # 追溯层数在通用数值分支之前做键级校验：布尔与非数值显式拒绝
+                # （通用分支会把 True 变 1；float(None) 抛 TypeError，经 web 层
+                # 会变成 500）；小数拒绝而不是静默截断；数值字符串沿用旧行为
+                # 接受。「不限层数」不走这里，由 network_depth_unlimited 承载。
+                if isinstance(value, bool):
+                    raise ValueError('层数应为数字')
+                try:
+                    number = float(value)
+                except (TypeError, ValueError):
+                    raise ValueError('层数应为数字') from None
+                if not math.isfinite(number):
+                    raise ValueError('层数应为数字')
+                if not number.is_integer():
+                    raise ValueError('层数应为整数')
+                if not 1 <= number <= 100:
+                    raise ValueError('层数应在 1 至 100 之间；不限层数请选择「不限层数」')
+                value = int(number)
+            elif isinstance(DEFAULTS[key], bool):
                 if not isinstance(value, bool):
                     raise ValueError(f'{key} 应为布尔值')
             elif isinstance(DEFAULTS[key], (int, float)):
@@ -183,8 +201,11 @@ class Store:
         proxy = urlparse(current['cloud_proxy'])
         if current['cloud_proxy'] and (proxy.scheme != 'http' or proxy.hostname not in {'localhost','127.0.0.1','::1'} or proxy.username or proxy.password or proxy.path not in {'','/'} or proxy.query or proxy.fragment or not proxy.port):
             raise ValueError('云端代理应为本机 HTTP 地址及端口，例如 http://127.0.0.1:7897')
-        if current['network_depth'] != 2 or current['daily_time'] != '09:00':
-            raise ValueError('当前版本固定北京时间 09:00、上下游两层')
+        # network_depth 的约束已前移为键级校验（1–100 的正整数；「不限层数」由
+        # network_depth_unlimited 布尔承载），存量非 2 的层数不再锁死与层数无关
+        # 的保存；daily_time 保持原规则，语义不变。
+        if current['daily_time'] != '09:00':
+            raise ValueError('当前版本固定北京时间 09:00')
         if current['budget_mode'] not in {'limited', 'unlimited'}:
             raise ValueError('费用模式无效')
         if current['relation_extractor'] not in {'local', 'cloud'}:
