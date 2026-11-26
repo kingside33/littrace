@@ -41,6 +41,11 @@ def parser():
     research.add_argument('--paper', action='append', default=[])
     research.add_argument('--direction', default='')
     research.add_argument('--project', action='store_true')
+    trace = commands.add_parser('trace', help='上游引用追溯任务（按设置页层数，沿引用逐层向上）')
+    trace.add_argument('action', choices=['run', 'status', 'pause', 'resume', 'paths'])
+    trace.add_argument('--id', help='追溯任务 ID；status/paths 省略时列最近 30 个任务')
+    trace.add_argument('--paper', help='run：种子文献（文献 ID/citekey/OpenAlex WID/DOI）；paths：过滤单篇')
+    trace.add_argument('--limit', type=int, default=20, help='paths 每篇最多展示的路径条数')
     export = commands.add_parser('export', help='导出离线页面或同步自动笔记')
     export.add_argument('kind', choices=['offline', 'notes', 'ris'])
     export.add_argument('options', nargs=argparse.REMAINDER)
@@ -57,6 +62,52 @@ def parser():
 
 def output(value):
     print(json.dumps(value, ensure_ascii=False, indent=2, default=str))
+
+def trace_command(store, args):
+    """上游追溯子命令的五个动词；层数只来自设置页（任务行快照启动时层数），CLI 不传。
+
+    run 同步推进一轮直至 完成/暂停/预算耗尽/缺 key；ValueError 统一冒泡，
+    由 main 的 trace 分支收敛为一句中文与退出码 1。
+    """
+    from kbapp.workflows.trace import handle_list, handle_pause, handle_resume, handle_start, handle_status
+    if args.action == 'run':
+        if not args.paper:
+            raise ValueError('trace run 需要 --paper 指定种子文献（文献 ID、citekey、OpenAlex WID 或 DOI）')
+        return handle_start(store, args.paper)
+    if args.action in {'pause', 'resume'} and not args.id:
+        raise ValueError(f'trace {args.action} 需要 --id 指定追溯任务')
+    if args.action == 'pause':
+        return handle_pause(store, args.id)
+    if args.action == 'resume':
+        return handle_resume(store, args.id)
+    if not args.id:
+        # 列表走轻查询（摘要 + 聚合计数），不做逐任务全量快照；--id 仍是全量。
+        return handle_list(store)
+    snapshot = handle_status(store, args.id)
+    if args.action == 'status':
+        return snapshot
+    return trace_paths_view(store, snapshot, args.paper, args.limit)
+
+def trace_paths_view(store, snapshot, paper, limit):
+    """来源路径输出：每篇已发现文献的层数、停止原因与种子→该篇的真实引用路径。
+
+    路径本身由引擎的 DFS 给出（快照 nodes[].paths），这里只做 --paper 过滤与
+    --limit 展示截断，不重算。
+    """
+    if limit < 1:
+        raise ValueError('路径展示条数应为正整数')
+    nodes = snapshot['nodes']
+    if paper:
+        target = store.resolve(paper)
+        wid = paper.strip().removeprefix('https://openalex.org/')
+        node = next((n for n in nodes if n['paper_id'] == target or n['wid'] == wid), None)
+        if not node:
+            raise ValueError('该文献不在本追溯任务的结果里')
+        nodes = [node]
+    return {'task_id': snapshot['id'], 'seed': snapshot['seed'], 'depth_display': snapshot['depth_display'],
+            'papers': [{'wid': n['wid'], 'paper_id': n['paper_id'], 'title': n['title'], 'min_depth': n['min_depth'],
+                        'status': n['status'], 'stop_reason': n['stop_reason'], 'note': n['note'],
+                        'paths': n['paths'][:limit], 'paths_total': len(n['paths'])} for n in nodes]}
 
 def main(argv=None):
     if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
@@ -164,6 +215,12 @@ def main(argv=None):
                     while get_run(store, rid, False)['status'] in {'queued', 'running'}:
                         step(store, rid)
             output(get_run(store, rid))
+    elif args.command == 'trace':
+        try:
+            output(trace_command(store, args))
+        except ValueError as exc:
+            output({'error': str(exc)})
+            return 1
     elif args.command == 'export':
         if args.kind == 'offline':
             from kbapp.workflows.publication import sync_exports
