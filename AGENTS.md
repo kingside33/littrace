@@ -28,7 +28,7 @@ git diff origin/main...HEAD --stat
 - **AI 产出必须带测试锚定才可合入。** 纯逻辑进 `tests/test_*.cjs` 并加进
   ci.yml 的显式清单;服务端逻辑进 pytest 离线套件(`tests/test_*.py`,不依赖
   网络与模型)。特权上下文与真机行为不写假单测,进真机验收清单。
-- **评审纪律。** 每个 PR 由独立评审员做一次完整评审;独立评审由与实现不同
+- **评审纪律。** 每个 PR 由独立评审员做一次完整评审;独立评审由与实现无共享
   上下文、未参与实现的会话承担,可以是 AI 会话(含自动化编排调用的子代理
   会话);**评审发现一律以 PR
   行内评论(line comments)发表**,不散落在 PR 正文或会话记录里。实现员逐条
@@ -38,7 +38,8 @@ git diff origin/main...HEAD --stat
   码:不 commit、不 push、不 resolve 评审线程。评审前先核对本地 worktree
   head 与 `gh pr view --json headRefOid` 一致,不一致立即停。发现以行内评论
   发表,带 `[P0]`/`[P1]`/`[P2]` 前缀与 path:line 证据,行号落在 diff 右侧
-  新增行内。裁决只有两种:有发现发 `--request-changes`,零发现发
+  新增行内;真实位置在未改行或不在 diff 内的发现(context-only),指向最近的
+  diff 行并写明真实位置。裁决只有两种:有发现发 `--request-changes`,零发现发
   `--approve`(仍列出查过什么);评审正文只写计数与结论,绝不写发现内容,
   并实测 `gh pr checks`。评审账号是 PR 作者时 GitHub 拒绝这两种类型,降级为
   `--comment` 提交同样结论并注明原因(完整规程见 CONTRIBUTING.md「Independent
