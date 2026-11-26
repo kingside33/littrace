@@ -4,7 +4,7 @@ import json
 import os
 import sys
 from collections import Counter
-from kbapp.library.cards import BASE, DIR_NAME, base_stem, build_ctx, default_figures_block, extract_figure_block, extract_manual_fm, extract_persist, first_sentence, load_citation_maps, load_figures, load_template, make_citekey, merge_duplicate_records, norm_text, parse_filename, pick_directions_with_basis, render, render_citations, tag_fields, write_papers_all
+from kbapp.library.cards import BASE, DIR_NAME, title_rules_digest, base_stem, build_ctx, default_figures_block, extract_figure_block, extract_manual_fm, extract_persist, first_sentence, load_citation_maps, load_figures, load_template, make_citekey, merge_duplicate_records, norm_text, parse_filename, pick_directions_with_basis, render, render_citations, tag_fields, write_papers_all
 
 def main(argv=None):
     try:
@@ -61,7 +61,8 @@ def main(argv=None):
         tf, other = tag_fields(p.get('tags') or [])
         authors = p.get('authors') or []
         dirs, basis = pick_directions_with_basis(p, rel or '')
-        records.append({'zotero_key': p['key'], 'title': p.get('title') or '', 'authors': authors, 'year': p.get('year'), 'venue': p.get('venue') or '', 'doi': p.get('doi') or '', 'abstract': p.get('abstract') or '', 'directions': dirs, 'direction_basis': basis, 'tagfields': tf, 'other_tags': other, 'metadata_source': 'zotero', 'pdf': pdf_path, 'pdf_location': pdf_loc, 'pdf_exists': pdf_ok, 'item_type': p.get('type'), 'collections': [c['path'] for c in p.get('collections') or []]})
+        digest_now = title_rules_digest()
+        records.append({'zotero_key': p['key'], 'title': p.get('title') or '', 'authors': authors, 'year': p.get('year'), 'venue': p.get('venue') or '', 'doi': p.get('doi') or '', 'abstract': p.get('abstract') or '', 'directions': dirs, 'direction_basis': basis, 'direction_rules_digest': digest_now, 'tagfields': tf, 'other_tags': other, 'metadata_source': 'zotero', 'pdf': pdf_path, 'pdf_location': pdf_loc, 'pdf_exists': pdf_ok, 'item_type': p.get('type'), 'collections': [c['path'] for c in p.get('collections') or []]})
     rel_to_paper = {v: k for k, v in paper_pdf.items()}
     by_qh = {}
     for p in pdfs:
@@ -121,7 +122,8 @@ def main(argv=None):
         if isinstance(year, str) and year.isdigit():
             year = int(year)
         dirs, basis = pick_directions_with_basis({'title': title, 'collections': []}, o['rel'])
-        records.append({'zotero_key': None, 'title': title, 'authors': authors, 'year': year, 'venue': enrich.get('venue') or '', 'doi': enrich.get('doi') or '', 'abstract': enrich.get('abstract') or '', 'directions': dirs, 'direction_basis': basis, 'tagfields': {}, 'other_tags': [], 'metadata_source': source, 'pdf': o['rel'], 'pdf_location': 'vault', 'pdf_exists': True, 'item_type': enrich.get('type') or None, 'collections': [], 'filename_parsed': parsed['parsed']})
+        digest_now = title_rules_digest()
+        records.append({'zotero_key': None, 'title': title, 'authors': authors, 'year': year, 'venue': enrich.get('venue') or '', 'doi': enrich.get('doi') or '', 'abstract': enrich.get('abstract') or '', 'directions': dirs, 'direction_basis': basis, 'direction_rules_digest': digest_now, 'tagfields': {}, 'other_tags': [], 'metadata_source': source, 'pdf': o['rel'], 'pdf_location': 'vault', 'pdf_exists': True, 'item_type': enrich.get('type') or None, 'collections': [], 'filename_parsed': parsed['parsed']})
     before = len(records)
     records, merged_dups = merge_duplicate_records(records)
     from kbapp.core.io import jsonl

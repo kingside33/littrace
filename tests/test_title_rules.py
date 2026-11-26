@@ -377,6 +377,28 @@ class RuleChangeCacheInvalidation(unittest.TestCase):
         self.assertEqual(row['direction_basis'], 'title_keywords')
         self.assertEqual(row['direction_rules_digest'], 'abc')
 
+    def test_build_cards_records_carry_rule_digest(self):
+        # build_cards 的 record 必须自带当时的规则摘要,否则写出的行摘要为 None,
+        # 卡片重建产出的文献永远进不了重算判据(PR #106 复核 P2)。
+        from kbapp.workflows.tools import build_cards
+        index = os.path.join(self.temp.name, 'index')
+        os.makedirs(index)
+        tpl = os.path.join(self.temp.name, 'tpl.md')
+        with open(tpl, 'w', encoding='utf-8') as fh:
+            fh.write('---\ntitle: {{title}}\n---\n')
+        with open(os.path.join(index, 'papers.jsonl'), 'w', encoding='utf-8') as fh:
+            fh.write(json.dumps({'key': 'K1', 'title': '冷原子干涉仪', 'authors': ['A'], 'year': 2020,
+                                 'collections': [], 'tags': []}, ensure_ascii=False) + '\n')
+        for name, body in (('pdf_inventory.jsonl', ''), ('paper_pdf_map.json', '{}')):
+            with open(os.path.join(index, name), 'w', encoding='utf-8') as fh:
+                fh.write(body)
+        cards.KEYWORD_RULES = [('冷原子', ['01'])]
+        build_cards.main(['--base', self.temp.name, '--index', index, '--template', tpl, '--records-only'])
+        row = _jsonl_first(os.path.join(index, 'papers_all.jsonl'))
+        self.assertEqual(row['directions'], ['01'])
+        self.assertEqual(row['direction_basis'], 'title_keywords')
+        self.assertEqual(row['direction_rules_digest'], cards.title_rules_digest())
+
     def test_sync_library_keeps_manual_direction_assignment(self):
         # 人工指定的方向不被入库覆盖;即使没有 directions 键也不能在 primary_direction 上抛错。
         store = Store(self.temp.name)
