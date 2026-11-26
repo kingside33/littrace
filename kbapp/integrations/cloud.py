@@ -43,6 +43,8 @@ PROBE_CODES = (
     'auth',
     'redirect_refused',
     'probe_unsupported',
+    'key_unreadable',
+    'key_platform_unsupported',
     'http',
 )
 
@@ -116,6 +118,8 @@ def _probe_summary(code, http_status=None):
         'auth': '鉴权被拒绝，请检查 API 密钥',
         'redirect_refused': '端点要求跳转到其他地址，已拒绝跟随',
         'probe_unsupported': '端点未提供 /models，无法自动验证',
+        'key_unreadable': '保存的密钥无法读取，未发起探测；请重新填写密钥',
+        'key_platform_unsupported': '本平台无法读取保存的密钥（密钥存储仅支持 Windows），未发起探测',
         'http': '端点返回了异常状态',
     }
     label = table.get(code, table['http'])
@@ -159,6 +163,27 @@ def probe_models(store):
             'model_listed': None,
         }
     headers = {'Accept': 'application/json'}
+    # `None` is "stored but unusable here", not "no key configured". Folding it
+    # into `or ''` would drop the Authorization header and then report `ok` /
+    # 「鉴权被接受」 for a request that was never authenticated — the silent
+    # half-working state AGENTS.md forbids. `auth` already means "check your
+    # key", which is wrong advice for a key that cannot be read, so it gets its
+    # own closed-vocabulary code.
+    #
+    # `None` still covers two different causes, and the advice must differ: a
+    # foreign/corrupt blob is fixed by retyping, while a platform with no
+    # protector (ADR 0041) fails on every retype. Reusing one sentence would
+    # tell that user to do something that can never work.
+    if cfg.get('api_key') is None:
+        code = 'key_platform_unsupported' if store.secret_state('api_key') == 'platform_unavailable' else 'key_unreadable'
+        return {
+            'verdict': 'failed',
+            'code': code,
+            'summary': _probe_summary(code),
+            'http_status': None,
+            'network_route': None,
+            'model_listed': None,
+        }
     api_key = cfg.get('api_key') or ''
     if api_key:
         # 空密钥不发头：否则会发出字面量 "Bearer "，部分网关直接 401，
@@ -395,10 +420,28 @@ def complete(store, prompt, purpose, max_tokens=3000, thinking=False):
             raise ValueError('任务已停止；未发起云端请求')
         return _complete(store, prompt, purpose, max_tokens, thinking)
 
+def _unusable_key_message(store, key):
+    """Advice for a stored secret this process cannot open.
+
+    The two causes need different actions, so they get different sentences:
+    a damaged/foreign ciphertext is fixed by retyping the key, while a platform
+    without a protector (ADR 0041) cannot store a key at all and the user must
+    not be sent to hunt for a new one.
+    """
+    return store.secret_advice(key) or '保存的密钥无法读取，请重新填写'
+
 def _complete(store, prompt, purpose, max_tokens=3000, thinking=False):
     cfg = store.settings()
     if not cfg['cloud_enabled']:
         raise ValueError('请在设置中配置模型、价格和费用上限后启用云端调用')
+    if cfg['api_key'] is None:
+        # A stored-but-unreadable secret is a `None` in the settings view.
+        # Refuse before reserve(): letting `'Bearer ' + None` raise later would
+        # record a phantom usage row and surface a TypeError string to the
+        # caller. The message names the two *different* remedies:
+        # "retype the key" only helps when the blob is damaged; when the
+        # platform ships no protector at all (ADR 0041), retyping never can.
+        raise ValueError(_unusable_key_message(store, 'api_key'))
     input_bound = len((SYSTEM + prompt).encode('utf-8')) + 1024
     amount = (input_bound * cfg['input_price'] + max_tokens * cfg['output_price']) / 1000000
     reservation = store.reserve(amount, purpose)

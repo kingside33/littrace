@@ -33,9 +33,22 @@ class OpenAlex:
             self.remaining = previous.get('remaining')
         self.used = 0.0
 
+    def key_message(self):
+        """不可用密钥的说明；可用或未配置时返回空串（保持原「请配置」文案）。
+
+        `OpenAlex.get` 把一切失败折叠成 ValueError 且不保留类型，追溯引擎按
+        消息前缀分类；两类原因的启发不同（重填 vs 无法保存），因此前缀也分开。
+        """
+        if self.cfg['openalex_key'] is not None:
+            return ''
+        return self.store.secret_advice('openalex_key')
+
     def get(self, path, params=None):
         if not self.cfg['openalex_key'] and (not self.allow_anonymous):
-            raise ValueError('请在网页配置 OpenAlex key 后继续分页补全')
+            # A stored-but-unreadable key is a `None` here. Telling that user to
+            # "configure an OpenAlex key" sends them to apply for a new one when
+            # the right action is to retype the key already held, so name it.
+            raise ValueError(self.key_message() or '请在网页配置 OpenAlex key 后继续分页补全')
         if self.calls >= self.cfg['external_requests_per_run']:
             raise ValueError('本轮外部请求上限已到，保留分页位置，下次续跑')
         if self.remaining is not None and self.remaining <= 0:
