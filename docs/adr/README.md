@@ -63,3 +63,4 @@ DecisionRecord,不按「决策是否重要」裁量。修订既有决策时,遵�
 | [0044](0044-s7-no-cross-origin-redirect-for-bearer.md) | [S7] Authorization 不随跨 origin 跳转转发 | urllib 重定向保留请求头,守卫只装探测路径,complete() 另立 #80 |
 | [0045](0045-p3-single-snapshot-read-and-section-scoped-writes.md) | [P3] 设置页单次快照读取,每组只写自己的 section | 各组自读发 6 个请求且显示不同时刻;整表保存会清掉对方的字段 |
 | [0046](0046-lessons-book-weekly-review.md) | [流程] 错题本单文件 + Seen 阈值升级,由每周周报 issue 驱动 | 格式门禁之外补 `--report` 与定时 issue,升级/删除才真正执行;不阻塞 PR |
+| [0047](0047-review-lock-transient-permissionerror-retry.md) | Windows 共享锁文件上的瞬时 PermissionError 按竞争重试,不作为错误上抛 | 瞬时共享冲突按竞争重试被吸收,真权限问题仍显式浮出(#97) |
