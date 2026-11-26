@@ -323,6 +323,25 @@ class ProbeUnreadableKey(CiphertextCase):
         from kbapp.integrations.cloud import PROBE_CODES
 
         self.assertIn('key_unreadable', PROBE_CODES)
+        self.assertIn('key_platform_unsupported', PROBE_CODES)
+
+    def test_probe_distinguishes_platform_unavailable_from_a_broken_blob(self):
+        """无保护器的平台上「重填密钥」永远无效，探测不能说同一句话。"""
+        from kbapp.integrations.cloud import _probe_summary
+
+        self.write_settings({'api_base': 'https://api.example.org/v1', 'api_key': 'anything'})
+        with patch('kbapp.storage.store.protect', no_protector), patch(
+            'kbapp.integrations.cloud.build_opener'
+        ) as factory:
+            result = probe_models(self.store)
+        factory.assert_not_called()
+        self.assertEqual(result['code'], 'key_platform_unsupported')
+        self.assertEqual(result['verdict'], 'failed')
+        # 不能说「请重新填写」——本平台重填不可能成功。
+        self.assertNotIn('重新填写', result['summary'])
+        self.assertIn('Windows', result['summary'])
+        # 与「密文损坏」是两句话，用户能分辨该做什么。
+        self.assertNotEqual(result['summary'], _probe_summary('key_unreadable'))
 
 
 class PlatformWithoutProtector(CiphertextCase):

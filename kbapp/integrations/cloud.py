@@ -44,6 +44,7 @@ PROBE_CODES = (
     'redirect_refused',
     'probe_unsupported',
     'key_unreadable',
+    'key_platform_unsupported',
     'http',
 )
 
@@ -118,6 +119,7 @@ def _probe_summary(code, http_status=None):
         'redirect_refused': '端点要求跳转到其他地址，已拒绝跟随',
         'probe_unsupported': '端点未提供 /models，无法自动验证',
         'key_unreadable': '保存的密钥无法读取，未发起探测；请重新填写密钥',
+        'key_platform_unsupported': '本平台无法读取保存的密钥（密钥存储仅支持 Windows），未发起探测',
         'http': '端点返回了异常状态',
     }
     label = table.get(code, table['http'])
@@ -167,11 +169,17 @@ def probe_models(store):
     # half-working state AGENTS.md forbids. `auth` already means "check your
     # key", which is wrong advice for a key that cannot be read, so it gets its
     # own closed-vocabulary code.
+    #
+    # `None` still covers two different causes, and the advice must differ: a
+    # foreign/corrupt blob is fixed by retyping, while a platform with no
+    # protector (ADR 0041) fails on every retype. Reusing one sentence would
+    # tell that user to do something that can never work.
     if cfg.get('api_key') is None:
+        code = 'key_platform_unsupported' if store.secret_state('api_key') == 'platform_unavailable' else 'key_unreadable'
         return {
             'verdict': 'failed',
-            'code': 'key_unreadable',
-            'summary': _probe_summary('key_unreadable'),
+            'code': code,
+            'summary': _probe_summary(code),
             'http_status': None,
             'network_route': None,
             'model_listed': None,
