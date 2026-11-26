@@ -62,6 +62,6 @@ def run(action, options, paths):
                         os.environ.pop(key, None)
                     else:
                         os.environ[key] = value
-    names = {'integrity': 'validate_integrity', 'relations': 'validate_relation_review', 'retrieval': 'kb_evaluate'}
+    names = {'integrity': 'validate_integrity', 'relations': 'validate_relation_review', 'retrieval': 'kb_evaluate', 'attachments': 'doctor_attachments'}
     module = importlib.import_module('kbapp.workflows.tools.' + names[action])
     return module.main(options) or 0
