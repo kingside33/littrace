@@ -90,17 +90,35 @@ class LeaseTest(unittest.TestCase):
         self.assertEqual(agents.recover_units(self.store)['taken_over'], 1)
 
     def test_heartbeat_extends_lease_while_running(self):
-        with Lease(self.store, 'u', interval=0.05):
+        interval = 0.05
+        # 窗口与 interval 成比例(20 次续租的机会),而不是一个孤立的魔数:
+        # #88 的失败是心跳线程错过了一个 0.2 s(4 × interval)的固定窗口,
+        # 这里给调度留 20 倍余量。上限 1 s 是为了 interval 被调大时窗口不跟着
+        # 膨胀——那样「续租间隔被放大几十倍」的回归就不会被判红。
+        window = min(20 * interval, 1.0)
+        renewals = 0
+        with Lease(self.store, 'u', interval=interval) as lease:
             first = lease_of(self.store, 'u')['lease_until']
-            # Poll instead of sleeping a fixed 0.2 s: a loaded CI runner can
-            # starve the heartbeat thread past that window, and the two reads
-            # then return the same timestamp.
-            deadline = time.monotonic() + 3.0
-            second = first
-            while second == first and time.monotonic() < deadline:
-                time.sleep(0.02)
-                second = lease_of(self.store, 'u')['lease_until']
-            self.assertGreater(second, first)
+            previous = first
+            deadline = time.monotonic() + window
+            # 数续租次数而不是只等一次变化:只等变化的话,interval 放大到
+            # 窗口之内仍然会变绿。
+            while time.monotonic() < deadline:
+                time.sleep(interval / 5)
+                current = lease_of(self.store, 'u')['lease_until']
+                if current != previous:
+                    renewals += 1
+                    previous = current
+            beat_alive = lease._thread.is_alive()
+            self.assertGreaterEqual(
+                renewals,
+                3,
+                f'{window:.2f}s 窗口内(interval={interval}s)按间隔应续租约 '
+                f'{int(window / interval)} 次,实际 {renewals} 次;心跳线程存活={beat_alive}。'
+                f'线程未存活 → 「首次异常即静默退出」(#134);线程存活但 0 次 → 心跳一次都'
+                f'没写成功;1–2 次 → 续租间隔被放大。',
+            )
+            self.assertGreater(previous, first)
         self.assertIsNone(lease_of(self.store, 'u'))
 
 
