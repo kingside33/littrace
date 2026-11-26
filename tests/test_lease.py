@@ -96,8 +96,9 @@ class LeaseTest(unittest.TestCase):
         # 续租次数,用绝对余量吸收 CI 的调度抖动。
         # 下限 = 窗口 / (4 × interval):旧用例的窗口就是 4 × interval 且只
         # 要求一次变化,等价于「4 个间隔内必须续租」;同强度换算到 20 个
-        # 间隔的窗口就是 ≥ 5 次。所以放宽的是**窗口**,不是**断言强度**——
-        # 把 interval 放大到 0.19 s 仍会判红,与旧用例的边界一致。
+        # 间隔的窗口就是 ≥ 5 次。所以放宽的是**窗口**,不是**续租速率**:
+        # 注入 interval 实测 ~0.19 s 起判红,与旧用例同一量级(边界随负载
+        # 抖动,不是精确值)。
         window = min(20 * interval, 1.0)
         expected = int(window / interval)
         required = expected // 4
