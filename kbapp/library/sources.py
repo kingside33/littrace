@@ -130,8 +130,17 @@ def sync_library(store, index, source_base=None):
                     r[field] = p.get(field)
                 r['id'] = identity(prev) if prev else identity(r)
                 r['citekey'] = (prev or {}).get('citekey') or cards.make_citekey(p.get('authors') or [], p.get('year'), p['title'], used)
-                r['directions'] = r.get('directions') or cards.pick_directions(p, '')
                 r['primary_direction'] = r.get('primary_direction') or r['directions'][0]
+                if r.get('direction_assignment') != 'manual':
+                    # 入库是题名推断的唯一写入点：记录来源与当时的规则摘要，规则变化后展示侧
+                    # 才能只重算「题名推断来的」方向（issue #100 要求 3；人工归类不动）。
+                    r['directions'], basis = cards.pick_directions_with_basis(p, '')
+                    r['primary_direction'] = r['directions'][0]
+                    if basis == 'title_keywords':
+                        r['direction_basis'] = basis
+                    else:
+                        r.pop('direction_basis', None)
+                    r['direction_rules_digest'] = cards.title_rules_digest()
                 r['tagfields'], _ = cards.tag_fields(p.get('tags') or [])
                 r['collections'] = [c['path'] for c in p.get('collections', [])]
                 if p.get('pdf') and p['pdf'].get('exists'):

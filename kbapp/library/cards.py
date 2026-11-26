@@ -28,12 +28,18 @@ DISK_RULES = _env_rules('KB_DISK_RULES', _DEFAULT_FOLDER_RULES)
 _DEFAULT_TITLE_RULES = [('覆盖|coverage|CPP|inspection|巡检|检测', ['04']), ('构型|变构|articulat|reconfigur|snake|蛇形', ['01', '05']), ('ROI|入口|交接|docking|handover', ['03']), ('路径规划|path planning|RRT|A\\*|Dijkstra|轨迹|trajectory', ['02']), ('优化|optimiz|metaheuristic|群智能|蚁群|粒子群|遗传', ['06']), ('传感器|sensor|感知|electric sense|SLAM|声呐|sonar|光场', ['08']), ('浊流|turbidity|沉积|sediment|海洋学|oceanograph', ['09'])]
 
 
-def validate_title_rules(value, name='KB_TITLE_RULES'):
-    """校验 [[正则, [方向编号]], ...] 并归一化；显式空列表合法（关闭题名推断）。"""
-    if not isinstance(value, list) or any((not isinstance(row, (list, tuple)) or len(row) != 2 for row in value)):
+def validate_title_rules(value, name='KB_TITLE_RULES', check_dirs=True):
+    """校验 [[正则, [方向编号]], ...] 并归一化；显式空列表合法（关闭题名推断）。
+
+    check_dirs=False 只验结构、形状与正则：导入阶段先用它加载内置词表，编号对生效
+    方向表的检查交给 ensure_title_rules() 在题名推断使用点补上。
+    """
+    if not isinstance(value, list):
         raise ValueError(f'{name} 必须是 [[正则, [方向编号]], ...] 形式的 JSON 数组')
     rules = []
     for index, row in enumerate(value, 1):
+        if not isinstance(row, (list, tuple)) or len(row) != 2:
+            raise ValueError(f'{name} 第 {index} 条 {json.dumps(row, ensure_ascii=False)} 必须是 [正则, [方向编号]] 形式的数组')
         pattern, dirs = row
         if not isinstance(pattern, str) or not pattern:
             raise ValueError(f'{name} 第 {index} 条 {json.dumps(row, ensure_ascii=False)} 的正则必须是非空字符串')
@@ -44,26 +50,47 @@ def validate_title_rules(value, name='KB_TITLE_RULES'):
         if not isinstance(dirs, (list, tuple)) or not dirs:
             raise ValueError(f'{name} 第 {index} 条 ({json.dumps(pattern, ensure_ascii=False)}) 的方向编号必须是非空数组')
         ids = [str(d) for d in dirs]
-        for d in ids:
-            if d not in DIR_ORDER:
-                raise ValueError(f'{name} 第 {index} 条 ({json.dumps(pattern, ensure_ascii=False)}, {json.dumps(dirs, ensure_ascii=False)}) 的方向编号 {json.dumps(d, ensure_ascii=False)} 不在方向表中')
+        if check_dirs:
+            for d in ids:
+                if d not in DIR_ORDER:
+                    raise ValueError(f'{name} 第 {index} 条 ({json.dumps(pattern, ensure_ascii=False)}, {json.dumps(dirs, ensure_ascii=False)}) 的方向编号 {json.dumps(d, ensure_ascii=False)} 不在方向表中')
         rules.append((pattern, ids))
     return rules
 
 
+def _unknown_direction_error(rules, name='KB_TITLE_RULES'):
+    """第一条与生效方向表不符的规则的报错文本；全部合法返回空串。"""
+    for index, (pattern, dirs) in enumerate(rules, 1):
+        for d in dirs:
+            if d not in DIR_ORDER:
+                return f'{name} 第 {index} 条 ({json.dumps(pattern, ensure_ascii=False)}, {json.dumps(list(dirs), ensure_ascii=False)}) 的方向编号 {json.dumps(d, ensure_ascii=False)} 不在方向表中'
+    return ''
+
+
 def load_title_rules():
-    """题名→方向规则三态：未设置 KB_TITLE_RULES 用内置词表，显式 [] 关闭题名推断，其余校验后生效。"""
+    """题名→方向规则三态：未设置 KB_TITLE_RULES 用内置词表，显式 [] 关闭题名推断，其余校验后生效。
+
+    导入阶段只验结构、形状与正则：编号对生效方向表的检查推迟到 ensure_title_rules()，
+    这样方向表已改、题名规则未配（或配了表外编号）的库仍能用不涉及题名推断的入口
+    （issue #100 / PR #106 评审）。
+    """
     value = env_json('KB_TITLE_RULES', None)
     if value is None:
-        try:
-            return validate_title_rules(_DEFAULT_TITLE_RULES)
-        except ValueError as exc:
-            # 内置词表对生效方向表 fail-fast(DR-1)时，指明这是默认值而非用户配置，并给出出路。
-            raise ValueError(
-                f'内置题名词表(未设置 KB_TITLE_RULES 时的默认值)不在生效方向表内: {exc}; '
-                '处理方式: 设置 KB_TITLE_RULES 显式给出题名规则, 或让 KB_DIRECTIONS 保留内置词表引用的方向编号'
-            ) from exc
-    return validate_title_rules(value)
+        return validate_title_rules(_DEFAULT_TITLE_RULES, check_dirs=False)
+    return validate_title_rules(value, check_dirs=False)
+
+
+def ensure_title_rules():
+    """题名推断使用点确认规则与生效方向表配套；不配套时报可操作错误。"""
+    error = _unknown_direction_error(KEYWORD_RULES)
+    if not error:
+        return
+    if os.environ.get('KB_TITLE_RULES') is None:
+        raise ValueError(
+            f'内置题名词表(未设置 KB_TITLE_RULES 时的默认值)不在生效方向表内: {error}; '
+            '处理方式: 设置 KB_TITLE_RULES 显式给出题名规则, 或让 KB_DIRECTIONS 保留内置词表引用的方向编号'
+        )
+    raise ValueError(f'{error}; 处理方式: 显式设置 KB_TITLE_RULES=[] 关闭题名推断, 或把该条规则改用生效方向表里的编号')
 
 
 KEYWORD_RULES = load_title_rules()
@@ -146,20 +173,33 @@ def directions_from_disk(rel):
     return []
 
 def directions_from_keywords(text):
+    if not KEYWORD_RULES:
+        return []
+    ensure_title_rules()
     for pat, ds in KEYWORD_RULES:
         if re.search(pat, text, re.IGNORECASE):
             return list(ds)
     return []
 
 def pick_directions(paper, rel):
+    """合集 → 题名关键词 → 磁盘 → 兜底 90；优先次序与语义保持不变。"""
+    return pick_directions_with_basis(paper, rel)[0]
+
+
+def pick_directions_with_basis(paper, rel):
+    """pick_directions 的带来源版本：入库时把 direction_basis 一并持久化，供规则
+    变化后按摘要重算题名推断出的方向（issue #100 要求 3 的真实入库路径）。"""
     dirs = directions_from_collections(paper.get('collections') or [])
+    basis = 'collections' if dirs else ''
     if not dirs:
         dirs = directions_from_keywords(paper.get('title') or '')
+        basis = 'title_keywords' if dirs else ''
     if not dirs:
         dirs = directions_from_disk(rel or '')
+        basis = 'disk' if dirs else ''
     if not dirs:
-        dirs = ['90']
-    return dirs
+        dirs, basis = ['90'], 'fallback'
+    return dirs, basis
 
 def tag_fields(tags):
     out = defaultdict(list)

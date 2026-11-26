@@ -85,21 +85,55 @@ class TitleRuleValidation(unittest.TestCase):
         self.assertIn('"02"', message)
         self.assertIn('不在方向表', message)
 
-    def test_builtin_vocabulary_fail_fast_when_builtin_ids_removed(self):
-        # DR-1 锚定：KB_DIRECTIONS 改掉内置编号且未设置 KB_TITLE_RULES 时，
-        # 内置词表过同一校验，加载即 fail-fast；报错指明默认值身份并给出两条出路。
+    def test_builtin_vocabulary_check_deferred_to_title_inference_use_points(self):
+        # PR #106 评审:内置词表是默认值而非用户配置。方向表改掉内置编号且未设置
+        # KB_TITLE_RULES 时,导入只验结构与正则,编号不配套在真正使用题名推断的地方
+        # 才报出来——不涉及题名推断的入口不能因为这条默认值整体起不来。
         saved = cards.DIR_ORDER
         cards.DIR_ORDER = ['A1', 'A2', '90']
         self.addCleanup(setattr, cards, 'DIR_ORDER', saved)
+        for raw in (None, '[]'):
+            if raw is None:
+                os.environ.pop('KB_TITLE_RULES', None)
+            else:
+                os.environ['KB_TITLE_RULES'] = raw
+            cards.KEYWORD_RULES = cards.load_title_rules()  # 导入路径:不抛错
+        os.environ.pop('KB_TITLE_RULES', None)
+        cards.KEYWORD_RULES = cards.load_title_rules()
+        # 题名推断使用点:报错指明默认值身份、具体规则与两条出路
         with self.assertRaises(ValueError) as ctx:
-            cards.load_title_rules()
+            cards.directions_from_keywords('覆盖与巡检')
         message = str(ctx.exception)
         self.assertIn('内置题名词表', message)
         self.assertIn('未设置 KB_TITLE_RULES 时的默认值', message)
+        self.assertIn('("覆盖|coverage|CPP|inspection|巡检|检测", ["04"])', message)
         self.assertIn('"04"', message)
         self.assertIn('不在方向表', message)
         self.assertIn('设置 KB_TITLE_RULES', message)
         self.assertIn('KB_DIRECTIONS', message)
+        # 用户显式配了表外编号:报错同样指名该条规则,并给出关闭题名推断的出路
+        os.environ['KB_TITLE_RULES'] = '[["冷原子", ["04"]]]'
+        cards.KEYWORD_RULES = cards.load_title_rules()
+        with self.assertRaises(ValueError) as ctx:
+            cards.directions_from_keywords('冷原子干涉仪')
+        message = str(ctx.exception)
+        self.assertIn('("冷原子", ["04"])', message)
+        self.assertIn('KB_TITLE_RULES=[]', message)
+
+    def test_structure_error_names_the_rule(self):
+        # issue #100 要求 2「错误信息指出具体是哪条规则(序号与内容)」:结构错误
+        # 同样要指名序号与内容,不能只给形状模板(PR #106 评审)。
+        for row, fragment in ((['x'], '["x"]'), (['x', ['01'], 'extra'], '["x", ["01"], "extra"]')):
+            with self.assertRaises(ValueError) as ctx:
+                cards.validate_title_rules([['正常', ['01']], row])
+            message = str(ctx.exception)
+            self.assertIn('第 2 条', message)
+            self.assertIn(fragment, message)
+            self.assertIn('必须是 [正则, [方向编号]] 形式的数组', message)
+        # 顶层不是数组仍按整体报错(没有「第几条」可指)
+        with self.assertRaises(ValueError) as ctx:
+            cards.validate_title_rules({'x': 1})
+        self.assertNotIn('第 1 条', str(ctx.exception))
 
     def test_custom_rules_first_match_for_cards_and_union_for_lineage(self):
         cards.KEYWORD_RULES = [('路径', ['02']), ('规划', ['06'])]
@@ -187,6 +221,42 @@ class RuleChangeCacheInvalidation(unittest.TestCase):
         paper = graph.graph_papers(self.store)['cold']
         self.assertEqual(paper['directions'], ['02'])
         self.assertEqual(paper['direction_basis'], 'title_keywords')
+
+    def test_persisted_title_inferred_directions_recompute_after_rule_change(self):
+        # 真实入库形态(sources.py 在入库时把 pick_directions 的结果连同来源与规则摘要
+        # 写进 papers):规则 A 推断出的方向已持久化,换成规则 B 后展示侧必须按 B 重算,
+        # 而不是因为 directions 非空就继续沿用旧值(PR #106 评审)。
+        self.store.put_papers([{'id': 'ingested', 'kind': 'library', 'title': '冷原子干涉仪',
+                                 'directions': ['04'], 'direction_basis': 'title_keywords',
+                                 'direction_rules_digest': cards.title_rules_digest()}])
+        cards.KEYWORD_RULES = [('冷原子', ['02'])]
+        self.assertEqual(graph.graph_papers(self.store)['ingested']['directions'], ['02'])
+        restart = Store(self.temp.name)
+        self.assertEqual(graph.graph_papers(restart)['ingested']['directions'], ['02'], '磁盘复用同样重算')
+
+    def test_persisted_manual_and_collection_directions_untouched_after_rule_change(self):
+        # 人工归类与合集/磁盘来源的方向不是题名推断产物:规则变化后保持原值(要求 2 的语义保护)。
+        self.store.put_papers([
+            {'id': 'manual', 'kind': 'library', 'title': '冷原子干涉仪', 'directions': ['08'],
+             'classification': {'manual': True}, 'direction_basis': 'title_keywords', 'direction_rules_digest': 'old'},
+            {'id': 'collection', 'kind': 'library', 'title': '冷原子干涉仪', 'directions': ['03'],
+             'direction_basis': 'collections', 'direction_rules_digest': 'old'},
+        ])
+        cards.KEYWORD_RULES = [('冷原子', ['02'])]
+        papers = graph.graph_papers(self.store)
+        self.assertEqual(papers['manual']['directions'], ['08'])
+        self.assertEqual(papers['collection']['directions'], ['03'])
+
+    def test_ingestion_records_direction_source_and_rule_digest(self):
+        # 入库写入点(sources.sync_library)必须留下来源,展示侧才能区分「题名推断」
+        # 与其他来源;pick_directions 的取值与优先次序保持不变。
+        cards.KEYWORD_RULES = [('冷原子', ['01'])]
+        self.assertEqual(cards.pick_directions_with_basis({'title': '冷原子干涉仪', 'collections': []}, ''),
+                         (['01'], 'title_keywords'))
+        self.assertEqual(cards.pick_directions_with_basis({'title': '无关键词题名', 'collections': []}, ''),
+                         (['90'], 'fallback'))
+        self.assertEqual(cards.pick_directions({'title': '冷原子干涉仪', 'collections': []}, ''), ['01'])
+        self.assertEqual(cards.pick_directions({'title': '无关键词题名', 'collections': []}, ''), ['90'])
 
 
 if __name__ == '__main__':

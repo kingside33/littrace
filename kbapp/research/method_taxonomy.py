@@ -60,8 +60,9 @@ def concept_families(row):
 def annotate(papers, concepts, direction='', prior=None, records=None):
     """为全部文献计算展示归类，具体算法ID仍可用于旧链接和精确筛选。"""
     by_method = {row['id']: concept_families(row) for row in concepts}
-    from kbapp.library.cards import KEYWORD_RULES, title_rules_digest
+    from kbapp.library.cards import KEYWORD_RULES, ensure_title_rules, title_rules_digest
     from kbapp.core.io import digest
+    ensure_title_rules()
     rules_digest = title_rules_digest()
     for paper in papers.values():
         raw = list(dict.fromkeys(paper.get('methods') or []))
@@ -86,15 +87,21 @@ def annotate(papers, concepts, direction='', prior=None, records=None):
         paper['method_family_scores'] = dict(votes)
         paper['primary_method_family'] = primary
         paper['methods'] = list(dict.fromkeys(raw + memberships))
-        # 外部文献通常没有已保存的方向：题名规则只补充展示，明确保留依据。
-        if not paper.get('directions') and not manual:
+        # 题名规则只补充展示，并明确保留依据。入库时记下的规则摘要与当前不一致时，
+        # 由题名推断来的方向按当前规则重算（issue #100 要求 3）；人工归类不参与。
+        stale = paper.get('direction_basis') == 'title_keywords' and paper.get('direction_rules_digest') != rules_digest
+        if (not paper.get('directions') or stale) and not manual:
             inferred = sorted({d for pattern, directions in KEYWORD_RULES
                                if re.search(pattern, paper.get('title', ''), re.I) for d in directions})
             paper['directions'] = inferred
             if inferred:
                 paper['direction_basis'] = 'title_keywords'
+                paper['direction_rules_digest'] = rules_digest
+            else:
+                paper.pop('direction_basis', None)
+                paper.pop('direction_rules_digest', None)
         if records is not None:
-            fields = ('method_families', 'method_family_scores', 'primary_method_family', 'methods', 'directions', 'direction_basis')
+            fields = ('method_families', 'method_family_scores', 'primary_method_family', 'methods', 'directions', 'direction_basis', 'direction_rules_digest')
             records[paper['id']] = {'fingerprint': fingerprint, 'fields': {k: paper[k] for k in fields if k in paper}}
     return papers
 
