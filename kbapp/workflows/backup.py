@@ -10,8 +10,12 @@ import time
 from kbapp.core.io import now
 
 
-def _counts(db):
-    counts = {}
+def counts(db):
+    """关键数据计数；manifest 的 counts 字段契约，备份与恢复校验共用同一实现。
+
+    （restore.py 复用本函数；此前为模块内私有 _counts，全仓库仅 create_backup 一个调用方。）
+    """
+    result = {}
     for name, sql in [
         ('papers', 'SELECT COUNT(*) FROM papers'),
         ('relations', 'SELECT COUNT(*) FROM relations'),
@@ -23,10 +27,10 @@ def _counts(db):
         ('agent_runs', 'SELECT COUNT(*) FROM agent_runs'),
     ]:
         try:
-            counts[name] = db.execute(sql).fetchone()[0]
+            result[name] = db.execute(sql).fetchone()[0]
         except sqlite3.Error:
-            counts[name] = None
-    return counts
+            result[name] = None
+    return result
 
 
 def create_backup(paths, keep=7, label='manual'):
@@ -41,12 +45,12 @@ def create_backup(paths, keep=7, label='manual'):
     try:
         src.backup(dst)
         integrity = dst.execute('PRAGMA integrity_check').fetchone()[0]
-        counts = _counts(dst)
+        snapshot = counts(dst)
     finally:
         dst.close()
         src.close()
     manifest = {'created': now(), 'label': label, 'source': str(paths.database), 'database': str(target),
-                'size_mb': round(target.stat().st_size / 1e6, 1), 'integrity': integrity, 'counts': counts,
+                'size_mb': round(target.stat().st_size / 1e6, 1), 'integrity': integrity, 'counts': snapshot,
                 'retention': f'保留最近 {keep} 份自动备份', 'external': {'notes': 'Obsidian 笔记与 Zotero 原件不在数据库内，需另行备份或依赖其自身同步'}}
     (folder / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding='utf-8')
     return dict(manifest, removed=prune(paths, keep))
