@@ -43,6 +43,8 @@ PROBE_CODES = (
     'auth',
     'redirect_refused',
     'probe_unsupported',
+    'key_unreadable',
+    'key_platform_unsupported',
     'http',
 )
 
@@ -116,6 +118,8 @@ def _probe_summary(code, http_status=None):
         'auth': '鉴权被拒绝，请检查 API 密钥',
         'redirect_refused': '端点要求跳转到其他地址，已拒绝跟随',
         'probe_unsupported': '端点未提供 /models，无法自动验证',
+        'key_unreadable': '保存的密钥无法读取，未发起探测；请重新填写密钥',
+        'key_platform_unsupported': '本平台无法读取保存的密钥（密钥存储仅支持 Windows），未发起探测',
         'http': '端点返回了异常状态',
     }
     label = table.get(code, table['http'])
@@ -159,6 +163,27 @@ def probe_models(store):
             'model_listed': None,
         }
     headers = {'Accept': 'application/json'}
+    # `None` is "stored but unusable here", not "no key configured". Folding it
+    # into `or ''` would drop the Authorization header and then report `ok` /
+    # 「鉴权被接受」 for a request that was never authenticated — the silent
+    # half-working state AGENTS.md forbids. `auth` already means "check your
+    # key", which is wrong advice for a key that cannot be read, so it gets its
+    # own closed-vocabulary code.
+    #
+    # `None` still covers two different causes, and the advice must differ: a
+    # foreign/corrupt blob is fixed by retyping, while a platform with no
+    # protector (ADR 0041) fails on every retype. Reusing one sentence would
+    # tell that user to do something that can never work.
+    if cfg.get('api_key') is None:
+        code = 'key_platform_unsupported' if store.secret_state('api_key') == 'platform_unavailable' else 'key_unreadable'
+        return {
+            'verdict': 'failed',
+            'code': code,
+            'summary': _probe_summary(code),
+            'http_status': None,
+            'network_route': None,
+            'model_listed': None,
+        }
     api_key = cfg.get('api_key') or ''
     if api_key:
         # 空密钥不发头：否则会发出字面量 "Bearer "，部分网关直接 401，
@@ -306,7 +331,10 @@ class SameHostRedirectHandler(HTTPRedirectHandler):
     urllib 默认会在重定向时保留请求头（只剥 Content-Length 与 Content-Type），
     一个被攻破或恶意配置的端点只要回 302 到自己的域名，就能让本机把 Bearer
     密钥明文送出去。SECURITY.md 把「密钥经 API/日志/诊断/错误信息泄漏」列为
-    in-scope，所以探测路径必须带这道防护。
+    in-scope，所以所有出站云端请求（探测与写路径）都必须带这道防护。
+
+    301 与 302 走同一个 `redirect_request`：`probe_code()` 的映射表把两者都归为
+    `redirect_refused`，这里也一视同仁，不因为 301 是「永久」跳转就放行。
 
     返回 None 让 urllib 拒绝跟随（随即以 HTTPError 形式抛出，由调用方归类）。
 
@@ -331,7 +359,7 @@ class SameHostRedirectHandler(HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def open_cloud(request, cfg, on_fallback=lambda: None, timeout=None, guard_redirects=False):
+def open_cloud(request, cfg, on_fallback=lambda: None, timeout=None, guard_redirects=True):
     """发出一个云端请求；代理可用时优先本地代理，未发出模型请求时回退系统网络。
 
     `timeout=None` 保持既有预算（代理 10s、系统 150s），既有调用方一个字不用改。
@@ -341,9 +369,10 @@ def open_cloud(request, cfg, on_fallback=lambda: None, timeout=None, guard_redir
     服务端若与之相等，用户会先看到客户端的「无法连接本地服务」，永远拿不到探测结论。
     早先的实现把两条腿各给 5s，最坏 10.03s 正好撞上那条线，与它想避免的失效路径相同。
 
-    `guard_redirects=True` 时两条路径都装 SameHostRedirectHandler。既有 `complete()`
-    不加（默认 False），保持它现在的传输行为不变——那里跟随重定向的既有暴露面
-    单列在这个 issue 里修，不在本 PR 里顺手改掉一条已经上线的写路径。
+    默认（`guard_redirects=True`）两条路径都装 SameHostRedirectHandler：urllib 跟随
+    重定向时会保留请求头，写路径 `complete()` 同样带着 Authorization，不能把密钥
+    转发给另一个 origin。只有显式传 `guard_redirects=False` 才恢复 urllib 的默认
+    重定向处理；当前没有调用方这样做。
     """
     deadline = None if timeout is None else time.monotonic() + timeout
 
@@ -395,10 +424,28 @@ def complete(store, prompt, purpose, max_tokens=3000, thinking=False):
             raise ValueError('任务已停止；未发起云端请求')
         return _complete(store, prompt, purpose, max_tokens, thinking)
 
+def _unusable_key_message(store, key):
+    """Advice for a stored secret this process cannot open.
+
+    The two causes need different actions, so they get different sentences:
+    a damaged/foreign ciphertext is fixed by retyping the key, while a platform
+    without a protector (ADR 0041) cannot store a key at all and the user must
+    not be sent to hunt for a new one.
+    """
+    return store.secret_advice(key) or '保存的密钥无法读取，请重新填写'
+
 def _complete(store, prompt, purpose, max_tokens=3000, thinking=False):
     cfg = store.settings()
     if not cfg['cloud_enabled']:
         raise ValueError('请在设置中配置模型、价格和费用上限后启用云端调用')
+    if cfg['api_key'] is None:
+        # A stored-but-unreadable secret is a `None` in the settings view.
+        # Refuse before reserve(): letting `'Bearer ' + None` raise later would
+        # record a phantom usage row and surface a TypeError string to the
+        # caller. The message names the two *different* remedies:
+        # "retype the key" only helps when the blob is damaged; when the
+        # platform ships no protector at all (ADR 0041), retyping never can.
+        raise ValueError(_unusable_key_message(store, 'api_key'))
     input_bound = len((SYSTEM + prompt).encode('utf-8')) + 1024
     amount = (input_bound * cfg['input_price'] + max_tokens * cfg['output_price']) / 1000000
     reservation = store.reserve(amount, purpose)

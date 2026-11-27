@@ -28,10 +28,22 @@ git diff origin/main...HEAD --stat
 - **AI 产出必须带测试锚定才可合入。** 纯逻辑进 `tests/test_*.cjs` 并加进
   ci.yml 的显式清单;服务端逻辑进 pytest 离线套件(`tests/test_*.py`,不依赖
   网络与模型)。特权上下文与真机行为不写假单测,进真机验收清单。
-- **评审纪律。** 每个 PR 由独立评审员做一次完整评审;**评审发现一律以 PR
+- **评审纪律。** 每个 PR 由独立评审员做一次完整评审;独立评审由与实现无共享
+  上下文、未参与实现的会话承担,可以是 AI 会话(含自动化编排调用的子代理
+  会话);**评审发现一律以 PR
   行内评论(line comments)发表**,不散落在 PR 正文或会话记录里。实现员逐条
   修复、在对应线程回复处理说明并 resolve;合并前所有评审线程必须 resolved,
   由集成管理员复核。
+- **评审会话规程。** 评审会话(与实现无共享上下文的独立会话)只评审、不改
+  码:不 commit、不 push、不 resolve 评审线程。评审前先核对本地 worktree
+  head 与 `gh pr view --json headRefOid` 一致,不一致立即停。发现以行内评论
+  发表,带 `[P0]`/`[P1]`/`[P2]` 前缀与 path:line 证据,行号落在 diff 右侧
+  新增行内;真实位置在未改行或不在 diff 内的发现(context-only),指向最近的
+  diff 行并写明真实位置。裁决只有两种:有发现发 `--request-changes`,零发现发
+  `--approve`(仍列出查过什么);评审正文只写计数与结论,绝不写发现内容,
+  并实测 `gh pr checks`。评审账号是 PR 作者时 GitHub 拒绝这两种类型,降级为
+  `--comment` 提交同样结论并注明原因(完整规程见 CONTRIBUTING.md「Independent
+  review pass」)。
 - **提交纪律。** `git commit -s`(DCO 硬门禁,CI 读 `Signed-off-by` trailer);
   不加 Co-Authored-By 尾注;提交信息用 `type(scope): 中文标题`。squash 合并
   时确认 trailer 保留(CONTRIBUTING.md「Pull requests」节的「Merge method」小节)。
@@ -59,7 +71,8 @@ DecisionRecord,不按「决策是否重要」裁量。** 机制选型、契约�
 origin/main 切分支、在独立 worktree(`.worktrees/<分支名>`)工作 → 门禁
 真实跑过(看到退出码 0 才算过)→ 提 PR(正文第一段 `Closes #N`)→ 行内
 评论评审、逐条解决 → squash 合并 → issue 自动关闭。评审、实现、集成由
-不同会话承担,实现不评审自己的代码。
+不同会话承担(评审可以是 AI 会话,含自动化编排调用的子代理会话),实现不
+评审自己的代码。
 
 ### 发现报错,先提 issue,再提 PR
 

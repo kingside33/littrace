@@ -921,10 +921,10 @@ class Cases(unittest.TestCase):
         self.assertFalse(list((self.store.paths.files / 'external-pdfs').glob('*.pdf')))
 
     def test_disabled_cloud_cannot_call_provider(self):
-        with patch('kbapp.integrations.cloud.urlopen') as http:
+        with patch('kbapp.integrations.cloud.build_opener') as factory:
             with self.assertRaisesRegex(ValueError, '配置'):
                 complete(self.store, 'prompt', 'test')
-            http.assert_not_called()
+            factory.assert_not_called()
 
     @DPAPI_REQUIRED
     def test_key_not_exposed_and_budget_configuration_required(self):
@@ -967,10 +967,8 @@ class Cases(unittest.TestCase):
             'choices': [{'message': {'content': '{"ok":true}'}}],
             'usage': {'prompt_tokens': 123, 'completion_tokens': 45},
         }
-        with patch(
-            'kbapp.integrations.cloud.urlopen',
-            return_value=io.BytesIO(json.dumps(payload).encode()),
-        ):
+        with patch('kbapp.integrations.cloud.build_opener') as factory:
+            factory.return_value.open.return_value = io.BytesIO(json.dumps(payload).encode())
             self.assertTrue(complete(self.store, 'test', 'unlimited')['ok'])
         status = workbench_status(self.store)
         self.assertFalse(status['today_cost_known'])
@@ -992,14 +990,12 @@ class Cases(unittest.TestCase):
             'choices': [{'message': {'content': None}, 'finish_reason': 'length'}],
             'usage': {'prompt_tokens': 20, 'completion_tokens': 3000},
         }
-        with patch(
-            'kbapp.integrations.cloud.urlopen',
-            return_value=io.BytesIO(json.dumps(payload).encode()),
-        ) as http:
+        with patch('kbapp.integrations.cloud.build_opener') as factory:
+            factory.return_value.open.return_value = io.BytesIO(json.dumps(payload).encode())
             with self.assertRaisesRegex(ValueError, '长度上限'):
                 complete(self.store, 'test', 'structured')
-            self.assertEqual(http.call_count, 1)
-            request = json.loads(http.call_args.args[0].data)
+            self.assertEqual(factory.return_value.open.call_count, 1)
+            request = json.loads(factory.return_value.open.call_args.args[0].data)
             self.assertEqual(request['thinking']['type'], 'disabled')
         self.assertEqual(workbench_status(self.store)['today_output_tokens'], 3000)
 
@@ -1167,15 +1163,17 @@ class Cases(unittest.TestCase):
     @DPAPI_REQUIRED
     def test_failed_provider_does_not_retry_or_release_uncertain_cost(self):
         self.configure(0.001)
-        with patch('kbapp.integrations.cloud.urlopen', side_effect=TimeoutError()) as http:
+        with patch('kbapp.integrations.cloud.build_opener') as factory:
+            factory.return_value.open.side_effect = TimeoutError()
             with self.assertRaises(ValueError):
                 complete(self.store, 'prompt', 'test', max_tokens=10)
-            self.assertEqual(http.call_count, 0)
+            self.assertEqual(factory.return_value.open.call_count, 0)
         self.configure(1)
-        with patch('kbapp.integrations.cloud.urlopen', side_effect=TimeoutError()) as http:
+        with patch('kbapp.integrations.cloud.build_opener') as factory:
+            factory.return_value.open.side_effect = TimeoutError()
             with self.assertRaises(ValueError):
                 complete(self.store, 'prompt', 'test', max_tokens=10)
-            self.assertEqual(http.call_count, 1)
+            self.assertEqual(factory.return_value.open.call_count, 1)
         with self.store.db() as db:
             row = db.execute('SELECT reserved,actual,status FROM usage').fetchone()
         self.assertGreater(row['reserved'], 0)
