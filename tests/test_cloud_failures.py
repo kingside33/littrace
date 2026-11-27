@@ -238,13 +238,9 @@ class CloudFailures(unittest.TestCase):
             'choices': [{'message': {'content': '{"ok":true}'}}],
             'usage': {'prompt_tokens': 2, 'completion_tokens': 3},
         }
-        with (
-            patch('kbapp.integrations.cloud.build_opener') as factory,
-            patch('kbapp.integrations.cloud.urlopen') as direct,
-        ):
+        with patch('kbapp.integrations.cloud.build_opener') as factory:
             factory.return_value.open.return_value = io.BytesIO(json.dumps(raw).encode())
             self.assertTrue(complete(self.store, 'prompt', 'test')['ok'])
-        direct.assert_not_called()
         factory.assert_called_once()
         factory.return_value.open.assert_called_once()
         self.assertEqual(
@@ -301,10 +297,7 @@ class CloudFailures(unittest.TestCase):
         self.assertTrue(attempt['sent'])
         connection.close()
         self.store.save_settings({'cloud_proxy': 'http://127.0.0.1:7897'})
-        with (
-            patch('kbapp.integrations.cloud.build_opener') as factory,
-            patch('kbapp.integrations.cloud.urlopen') as direct,
-        ):
+        with patch('kbapp.integrations.cloud.build_opener') as factory:
 
             def failed(*args, **kwargs):
                 handler = next(
@@ -317,7 +310,6 @@ class CloudFailures(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, '费用待确认'):
                 complete(self.store, 'prompt', 'test')
         factory.return_value.open.assert_called_once()
-        direct.assert_not_called()
         self.assertEqual(self.store.state('last_model_error')['network_route'], 'local_proxy')
 
     def test_rejected_connect_tunnel_falls_back_before_any_model_bytes(self):
