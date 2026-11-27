@@ -5,9 +5,28 @@ import json
 import sqlite3
 import time
 from datetime import datetime
-from kbapp.core.secrets import protect
+from kbapp.core.secrets import SecretDecryptError, SecretProtectionUnavailable, protect
 from kbapp.core.io import TZ, atomic, digest, now, read_json
 from kbapp.core.config import DEFAULTS, KINDS
+
+# Stored secrets: DPAPI ciphertext bound to the current Windows user. A blob
+# copied from another machine/account (or after a profile rebuild) may exist but
+# be undecryptable, which is a state callers must be able to tell apart from
+# "no key stored". See `settings()`.
+SECRET_KEYS = ('api_key', 'openalex_key')
+
+# Advice shown when a key is stored but this process cannot use it. The two
+# causes need different actions: retyping fixes a foreign/corrupt blob, but
+# nothing the user types can work on a platform with no protector (ADR 0041).
+# These are fixed interface sentences, unrelated to any decrypted value.
+KEY_UNUSABLE_HINT = {
+    # 与 issue #81 的验收文案一致：云端调用的 400 仍是这一句。
+    'api_key': '保存的密钥无法读取，请重新填写',
+    # OpenAlex 的 key 是另一件事，且它的默认文案会把人引向「去申请」，
+    # 所以单独说明正确动作是「重新填写」。
+    'openalex_key': '已保存的 OpenAlex key 无法读取，请到工作台设置页重新填写',
+}
+KEY_UNUSABLE_PLATFORM_HINT = '本平台无法读取保存的密钥（密钥存储仅支持 Windows），请参考设置页的平台说明'
 
 class Store:
 
@@ -144,26 +163,116 @@ class Store:
         }
 
     def settings(self, public=False):
+        """Read settings, never raising because a stored secret cannot be decrypted.
+
+        DPAPI ciphertext is bound to the Windows user that wrote it, so a data
+        directory restored from a backup, copied from another machine/account,
+        or read after a profile rebuild can hold a secret this process cannot
+        open. In that case the non-public view returns `None` for that key: a
+        stored-but-unreadable secret is distinguishable both from `''`
+        (nothing stored) and from plaintext. `None` is falsy, so callers that
+        only ask "is there a usable key?" keep working.
+
+        Two *different* reasons collapse into that `None`, and callers that
+        must word the advice correctly read `secret_state()` instead:
+
+        - `unreadable` — the blob was written by another Windows user; retyping
+          the key recovers it;
+        - `platform_unavailable` — this platform ships no protector (ADR 0041);
+          retyping cannot help here.
+
+        The public view (booleans only) still reports `True` for a stored
+        secret, because one *is* stored, and adds `secrets_unavailable` naming
+        the reason per key so the interface does not show a green "saved, cloud
+        enabled" for a key no call can use.
+        """
         result = dict(DEFAULTS)
         data = read_json(self.paths.state / 'settings.json', {})
+        unavailable = {}
         for key, value in data.items():
-            if key in {'api_key', 'openalex_key'}:
-                result[key] = bool(value) if public else protect(value, decrypt=True)
+            if key in SECRET_KEYS:
+                revealed, state = self._reveal_with_state(value)
+                result[key] = bool(value) if public else revealed
+                if state in ('unreadable', 'platform_unavailable'):
+                    unavailable[key] = state
             elif key in DEFAULTS:
                 result[key] = value
         if public:
-            for key in ('api_key', 'openalex_key'):
+            for key in SECRET_KEYS:
                 result[key] = bool(result[key])
+            if unavailable:
+                result['secrets_unavailable'] = unavailable
         return result
+
+    def secret_state(self, key):
+        """Classify one stored secret: absent / ok / unreadable / platform_unavailable.
+
+        Platform capability is deliberately its own state, not folded into
+        `unreadable`: `kbapp/core/secrets.py` raises `SecretProtectionUnavailable`
+        before it ever looks at the blob on a non-Windows machine, so that is a
+        permanent "no protector", not a damaged copy.
+
+        Only the classification comes back, never the plaintext, so callers that
+        log or render it cannot leak the key.
+        """
+        value = read_json(self.paths.state / 'settings.json', {}).get(key, '')
+        return self._reveal_with_state(value)[1]
+
+    @staticmethod
+    def _reveal_with_state(value):
+        """Decrypt one stored secret → `(plaintext_or_None, state)`.
+
+        `state` is one of `absent` (nothing stored), `ok`, `unreadable`
+        (foreign/corrupt ciphertext) or `platform_unavailable` (no protector).
+        Only the latter two make the plaintext `None`; `absent` maps to `''`
+        so callers that ask "is there a usable key?" keep the old behaviour.
+        """
+        if not value:
+            return '', 'absent'
+        try:
+            return protect(value, decrypt=True), 'ok'
+        except SecretProtectionUnavailable:
+            # No protector on this platform. Not an exception to throw at callers
+            # that just read settings (that would re-lock every save, the state
+            # #81 exists to remove); `secret_state()` names it for the advice.
+            return None, 'platform_unavailable'
+        except (SecretDecryptError, ValueError):
+            # ValueError covers binascii.Error from a non-base64 blob.
+            return None, 'unreadable'
+
+    def secret_advice(self, key):
+        """Readable, actionable sentence for a secret that is stored but unusable.
+
+        Empty string when the secret is usable (or absent): callers only have a
+        problem to explain when `secret_state()` is `unreadable` or
+        `platform_unavailable`.
+        """
+        state = self.secret_state(key)
+        if state == 'unreadable':
+            return KEY_UNUSABLE_HINT[key]
+        if state == 'platform_unavailable':
+            return KEY_UNUSABLE_PLATFORM_HINT
+        return ''
 
     def save_settings(self, values):
         from urllib.parse import urlparse
         import math
+        # The raw map is what an untouched secret is written back from: it may
+        # hold ciphertext this process cannot decrypt, which must survive a
+        # save of unrelated fields byte for byte.
+        raw = read_json(self.paths.state / 'settings.json', {})
         current = self.settings()
+        # The settings page posts the whole form on every save, so its
+        # `cloud_enabled` is the current checkbox state and may be `True` on a
+        # save whose only real change is an unrelated field. Only an explicit
+        # off→on transition with an unreadable key is refused; otherwise the
+        # user would be re-locked out of every settings change (the state #81
+        # exists to remove).
+        was_cloud_enabled = current['cloud_enabled']
         for key, value in values.items():
             if key not in DEFAULTS:
                 raise ValueError(f'未知配置：{key}')
-            if key in {'api_key', 'openalex_key'} and value is None:
+            if key in SECRET_KEYS and value is None:
                 continue
             if key == 'network_depth':
                 # 追溯层数在通用数值分支之前做键级校验：布尔与非数值显式拒绝
@@ -213,11 +322,44 @@ class Store:
         if not 2048 <= current['local_text_context'] <= 32768:
             raise ValueError('本地核验上下文应在 2048 至 32768 之间')
         if current['cloud_enabled']:
-            if not all((current[k] for k in ('api_base', 'model', 'api_key'))):
+            # Check the non-secret fields first so the normal-path message is
+            # unchanged. A `None` api_key means "stored but unreadable": it
+            # cannot be used, so an explicit request to enable cloud calls gets
+            # a message naming the fix instead of echoing a DPAPI/base64
+            # exception. Saves that do not touch the switch keep working (the
+            # ciphertext is written back verbatim below), so an unrelated
+            # settings change cannot re-lock the page.
+            if not all((current[k] for k in ('api_base', 'model'))):
+                raise ValueError('启用前需填写 API、模型与密钥')
+            if current['api_key'] is None:
+                # `secret_state()` splits the two causes so the 400 says
+                # "retype the key" for a foreign/corrupt blob and "this platform
+                # cannot hold a key" (ADR 0041) where retyping is futile.
+                if not was_cloud_enabled and values.get('cloud_enabled') is True:
+                    raise ValueError(self.secret_advice('api_key'))
+            elif not current['api_key']:
                 raise ValueError('启用前需填写 API、模型与密钥')
             if current['budget_mode'] == 'limited' and (not all((current[k] for k in ('daily_budget', 'input_price', 'output_price')))):
                 raise ValueError('限额模式需填写输入/输出价格与每日限额；暂不限制需明确选择不限额模式')
-        encrypted = {k: protect(v) if k in {'api_key', 'openalex_key'} else v for k, v in current.items()}
+        encrypted = {}
+        for key, value in current.items():
+            if key in SECRET_KEYS:
+                # A value supplied in this request (including '' to clear) is
+                # encrypted fresh, without ever opening the old ciphertext.
+                # An untouched key is written back exactly as stored: decrypt
+                # + re-encrypt would fail outright when the blob is unreadable.
+                if key in values and values[key] is not None:
+                    try:
+                        encrypted[key] = protect(value)
+                    except SecretProtectionUnavailable:
+                        # Storing a non-empty secret needs a protector this
+                        # platform does not have. Answer a readable 400 rather
+                        # than leaking a 500 (ADR 0041: other fields still save).
+                        raise ValueError(KEY_UNUSABLE_PLATFORM_HINT) from None
+                else:
+                    encrypted[key] = raw.get(key, '')
+            else:
+                encrypted[key] = value
         atomic(self.paths.state / 'settings.json', encrypted)
         # A cache location change must take effect now, not on the next restart.
         # A path that cannot be created or written raises here, after the other

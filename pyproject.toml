@@ -8,6 +8,9 @@ build-backend = "setuptools.build_meta"
 name = "littrace"
 version = "0.1.0"
 description = "本地文献知识库：全文精读、证据检索与研究工作台"
+# setuptools 按后缀把 .md 推导为 text/markdown，并据此填 long_description；
+# 缺这一项时 twine check --strict 把两条 warning 当失败（issue #87）。
+readme = "README.md"
 # SPDX 标识；仓库根的 LICENSE 是 AGPL-3.0-only 全文。
 license = "AGPL-3.0-only"
 license-files = ["LICENSE"]

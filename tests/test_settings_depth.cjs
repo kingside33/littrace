@@ -140,3 +140,29 @@ test('invalid custom depth shows an error and posts nothing',async()=>{
     assert.match(app.errors[0].message,/不限层数/);
   }
 });
+
+test('the summary tells the truth when a stored key cannot be read',async()=>{
+  // 存量密文读不出时 public 视图带 secrets_unavailable。此时「密钥已保存 ·
+  // 云端已启用」会是一盏骗人的绿灯：每次云端调用都会在 _complete 失败。
+  // 摘要经 insertAdjacentHTML 注入，落在 setup 的 record.inserts 里。
+  const summaryHtml=app=>app.record.inserts.map(i=>i.html).join('\n');
+
+  const unreadable=setup({api_key:true,cloud_enabled:true,secrets_unavailable:{api_key:'unreadable'}},formInputs);
+  await unreadable.page();
+  const html=summaryHtml(unreadable);
+  assert.match(html,/已保存但本机无法读取/);
+  assert.match(html,/密钥无法读取，云端不可用/);
+  assert.ok(!/密钥已保存 · 云端已启用/.test(html),'must not paint the green enabled light');
+
+  // 可读的密钥照常显示「已保存 · 已启用」，不能被这条改动误伤。
+  const healthy=setup({api_key:true,cloud_enabled:true},formInputs);
+  await healthy.page();
+  const ok=summaryHtml(healthy);
+  assert.match(ok,/密钥已保存 · 云端已启用/);
+  assert.ok(!/无法读取/.test(ok));
+
+  // 没存密钥仍是「未保存 · 未启用」，第三种状态不被吞并。
+  const absent=setup({api_key:false,cloud_enabled:false},formInputs);
+  await absent.page();
+  assert.match(summaryHtml(absent),/密钥未保存 · 云端未启用/);
+});
