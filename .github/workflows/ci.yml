@@ -37,7 +37,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
@@ -110,7 +110,7 @@ jobs:
       PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -146,7 +146,7 @@ jobs:
         os: [ubuntu-24.04, windows-latest]
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
@@ -183,6 +183,7 @@ jobs:
             tests/test_reliability_graph.cjs
             tests/test_role_bubbles.cjs
             tests/test_search.cjs
+            tests/test_settings_depth.cjs
             tests/test_task_entry.cjs
         run: |
           node - <<'JS'
@@ -239,6 +240,7 @@ jobs:
             tests/test_reliability_graph.cjs \
             tests/test_role_bubbles.cjs \
             tests/test_search.cjs \
+            tests/test_settings_depth.cjs \
             tests/test_task_entry.cjs
 
   # The plugin builds with zotero-plugin-scaffold (esbuild + zip) and never
@@ -266,7 +268,7 @@ jobs:
         working-directory: plugin
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - name: Install build dependencies
@@ -304,7 +306,7 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
