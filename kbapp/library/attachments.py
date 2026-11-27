@@ -29,6 +29,36 @@ def classify_attachment(attachment):
     return 'unknown', 'available'
 
 
+def _default_primary_document(paper, documents):
+    """未人工指定时，优先把主附件的文档当作当前证据版本。
+
+    旧实现直接取 ``updated`` 最新的文档。``updated`` 由 ``kbapp.core.io.now``
+    生成，精度只到秒：同一批导入的附件常落在同一秒，先后次序不可区分；跨秒时
+    又会把后登记的补充材料当成主版本。因此这里依次按主附件 key、主附件路径、
+    附件角色（主附件）判定；只有全部落空时才退回按 ``updated`` 倒序、同秒按
+    登记顺序（rowid）的稳定兜底，保证结果不随写入时刻漂移。
+    """
+    existing = [doc for doc in documents if Path(doc['path']).is_file()]
+    primary_key = paper.get('primary_attachment_key') or ''
+    if primary_key:
+        for doc in existing:
+            if doc['attachment_key'] == primary_key:
+                return doc['id']
+    primary_path = paper.get('pdf') or ''
+    if primary_path:
+        for doc in existing:
+            if doc['path'] == primary_path:
+                return doc['id']
+    by_key = {}
+    for doc in existing:
+        by_key.setdefault(doc['attachment_key'], doc['id'])
+    for att in paper.get('attachments') or []:
+        role, status = classify_attachment(att)
+        if role == 'primary' and status == 'available' and by_key.get(att.get('key')):
+            return by_key[att['key']]
+    return existing[0]['id'] if existing else ''
+
+
 def attachments_of(store, paper_id):
     """列出附件与已登记文档，标注角色、状态与当前证据版本。"""
     pid = store.resolve(paper_id)
@@ -38,13 +68,10 @@ def attachments_of(store, paper_id):
     primary_key = paper.get('primary_attachment_key') or ''
     primary_path = paper.get('pdf') or ''
     with store.db() as db:
-        documents = [dict(r) for r in db.execute('SELECT id,attachment_key,sha256,path,page_count,payload,updated FROM documents WHERE paper_id=? ORDER BY updated DESC', (pid,))]
+        documents = [dict(r) for r in db.execute('SELECT id,attachment_key,sha256,path,page_count,payload,updated FROM documents WHERE paper_id=? ORDER BY updated DESC,rowid ASC', (pid,))]
     primary_document = paper.get('primary_document') or ''
     if not primary_document:
-        for doc in documents:
-            if Path(doc['path']).is_file():
-                primary_document = doc['id']
-                break
+        primary_document = _default_primary_document(paper, documents)
     items = []
     for att in paper.get('attachments') or []:
         role, status = classify_attachment(att)

@@ -58,6 +58,9 @@ def parser():
     backup = commands.add_parser('backup', help='创建 SQLite 一致性备份')
     backup.add_argument('--keep', type=int, default=7, help='保留最近 N 份自动备份')
     backup.add_argument('--label', default='manual', help='备份标签，例如 before-upgrade')
+    restore = commands.add_parser('restore', help='按选定的历史备份只读校验并恢复 SQLite 到新的隔离数据目录')
+    restore.add_argument('--backup', required=True, help='备份目录（含 workbench.sqlite3 与 manifest.json，可在任意位置）')
+    restore.add_argument('--target', required=True, help='新的隔离数据目录；拒绝覆盖现有数据，恢复范围仅为 SQLite')
     return p
 
 def output(value):
@@ -119,6 +122,18 @@ def main(argv=None):
     if args.command == 'backup':
         from kbapp.workflows.backup import create_backup
         output(create_backup(paths, keep=args.keep, label=args.label))
+        return 0
+    if args.command == 'restore':
+        # 恢复与校验全程 raw sqlite3 只读，不经 AppContext/Store：Store 一打开就建表
+        # +迁移+WAL，违反「恢复过程不得运行 schema 升级或后台任务」。分支必须位于
+        # AppContext.create 之前。
+        from kbapp.workflows.restore import RestoreError, restore_backup
+        try:
+            report = restore_backup(paths, args.backup, args.target)
+        except RestoreError as exc:
+            output({'ok': False, 'stage': exc.stage, 'error': str(exc)})
+            return 1
+        output(report)
         return 0
     if args.command == 'data':
         if args.action == 'tool':
